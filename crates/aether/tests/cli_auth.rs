@@ -132,6 +132,10 @@ async fn client_login_and_logout_use_the_daemons_path_and_doctor_names_duplicate
         .find(|info| info.provider == "claude-code")
         .unwrap();
     assert_eq!(info.program.as_deref(), second.to_str());
+    assert!(
+        info.methods.is_empty(),
+        "ready CLI auth methods must remain unchanged"
+    );
     output(root.path(), false, &["login", "claude-code"]).await;
     assert!(second.with_extension("login").exists());
     assert!(

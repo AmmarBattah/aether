@@ -49,9 +49,6 @@ pub(super) async fn auth_status(daemon: &Daemon) -> Result<Reply, ErrorReply> {
         }
         let status = daemon.models.auth_status(&provider.id).await;
         let mut methods = Vec::new();
-        if provider.auth.cli.is_some() {
-            methods.push("cli".to_owned());
-        }
         if !provider.auth.api_key_env.is_empty() {
             methods.push("api_key".to_owned());
         }

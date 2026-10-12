@@ -94,6 +94,9 @@ fn rows(app: &App) -> Vec<(PickerRow, String)> {
 /// Where the provider stands and what Enter would do about it.
 pub(crate) fn status(info: &AuthInfo, theme: &Theme) -> String {
     let dot = sep(theme);
+    if info.configured && info.methods.is_empty() {
+        return "no sign-in needed".into();
+    }
     if info.program.is_none()
         && !info.methods.is_empty()
         && info.methods.iter().all(|m| m == "none")

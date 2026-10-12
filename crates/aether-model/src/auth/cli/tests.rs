@@ -7,7 +7,14 @@ fn executable(directory: &Path, name: &str, script: &str) -> PathBuf {
     assert!(directory.is_dir(), "fixture directory must exist");
     assert!(!name.contains('/'), "fixture name must be a program name");
     let path = directory.join(name);
-    std::fs::write(&path, format!("#!/bin/sh\n{script}\n")).expect("fixture filesystem operation");
+    // A child writes the script so sibling forks cannot inherit a writable handle.
+    let status = std::process::Command::new("/bin/sh")
+        .args(["-c", r#"printf '%s' "$1" > "$2""#, "sh"])
+        .arg(format!("#!/bin/sh\n{script}\n"))
+        .arg(&path)
+        .status()
+        .expect("write executable fixture");
+    assert!(status.success(), "writing fixture failed: {status}");
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
         .expect("fixture filesystem operation");
     path.canonicalize().expect("fixture filesystem operation")
