@@ -1,0 +1,56 @@
+── unicode 80 compact
+• researcher [explorer] finished · 1m 03s · $0.21 with children
+  └ Three callers sync on the request path:
+    store.rs:88 commit
+    store.rs:140 flush…
+    ✓ tester · 1m 20s · $0.09
+── unicode 80 detail
+• researcher [explorer] finished · 1m 03s · $0.21 with children
+  └ Three callers sync on the request path:
+    store.rs:88 commit
+    store.rs:140 flush
+    wal.rs:42 append
+    The rest run in the compactor.
+    ✓ tester · 1m 20s · $0.09
+── unicode 120 compact
+• researcher [explorer] finished · 1m 03s · $0.21 with children
+  └ Three callers sync on the request path:
+    store.rs:88 commit
+    store.rs:140 flush…
+    ✓ tester · 1m 20s · $0.09
+── unicode 120 detail
+• researcher [explorer] finished · 1m 03s · $0.21 with children
+  └ Three callers sync on the request path:
+    store.rs:88 commit
+    store.rs:140 flush
+    wal.rs:42 append
+    The rest run in the compactor.
+    ✓ tester · 1m 20s · $0.09
+── ascii 80 compact
+* researcher [explorer] finished | 1m 03s | $0.21 with children
+  \ Three callers sync on the request path:
+    store.rs:88 commit
+    store.rs:140 flush~
+    + tester | 1m 20s | $0.09
+── ascii 80 detail
+* researcher [explorer] finished | 1m 03s | $0.21 with children
+  \ Three callers sync on the request path:
+    store.rs:88 commit
+    store.rs:140 flush
+    wal.rs:42 append
+    The rest run in the compactor.
+    + tester | 1m 20s | $0.09
+── ascii 120 compact
+* researcher [explorer] finished | 1m 03s | $0.21 with children
+  \ Three callers sync on the request path:
+    store.rs:88 commit
+    store.rs:140 flush~
+    + tester | 1m 20s | $0.09
+── ascii 120 detail
+* researcher [explorer] finished | 1m 03s | $0.21 with children
+  \ Three callers sync on the request path:
+    store.rs:88 commit
+    store.rs:140 flush
+    wal.rs:42 append
+    The rest run in the compactor.
+    + tester | 1m 20s | $0.09

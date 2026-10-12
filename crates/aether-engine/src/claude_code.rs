@@ -1,0 +1,294 @@
+//! Claude Code as an engine: `claude -p --output-format stream-json`.
+//!
+//! Messages sent while a turn runs go to the CLI's stdin. It folds them in at
+//! its next step (after the current tool, or as a new turn after its result)
+//! and, with `--replay-user-messages`, echoes each one when it does; that
+//! echo is the acknowledgement the runtime waits for before recording the
+//! message as consumed.
+
+use std::path::PathBuf;
+
+use serde_json::json;
+use tokio_util::sync::CancellationToken;
+
+use crate::detect::{self, DetectError, EngineVersion};
+use crate::offline::{self, executable_on_path};
+use crate::{Engine, EngineError, EngineKind, EngineRun, EngineTurn, run_process};
+
+// Native coordination would create state outside Aether's tracked tree and
+// durable scheduler. Keep native workspace/research tools, including background
+// Bash's TaskOutput/TaskStop and the code-review renderer ReportFindings.
+const NATIVE_COORDINATION_TOOLS: &str = "Task,Agent,ListAgents,SendMessage,ScheduleWakeup,CronCreate,CronDelete,CronList,Workflow,RemoteTrigger";
+
+/// Support matrix: the oldest `claude` this adapter's offline sandbox path is
+/// verified against. `args()` unconditionally passes `--replay-user-messages`
+/// and `--include-partial-messages`, passes `--effort` whenever a turn's
+/// effort is set (agent config or the protocol default, which is most
+/// turns), and (offline turns only) depends on the native sandbox's
+/// `network` settings block; 2.1.219 is the one version boundary already
+/// established in this codebase (see `validate_offline_support`, and
+/// `docs/engines.md`'s sandbox section) as supporting all of them together.
+/// Earlier releases may well support the non-sandbox flags too, but that is
+/// not independently verified here, so registration does not gate on this
+/// floor - only `validate_offline_support`, the one path it
+/// is actually verified for, does. A `claude` below it still registers, with
+/// [`ClaudeCodeEngine::limitation`] naming the gap.
+pub const MIN_VERSION: EngineVersion = EngineVersion::new(2, 1, 219);
+
+#[derive(Debug, Clone)]
+pub struct ClaudeCodeEngine {
+    program: String,
+    version: String,
+    prompt_cache_ttl: Option<aether_core::model::PromptCacheTtl>,
+}
+
+impl ClaudeCodeEngine {
+    pub fn new(program: impl Into<String>, version: impl Into<String>) -> Self {
+        Self {
+            program: program.into(),
+            version: version.into(),
+            prompt_cache_ttl: None,
+        }
+    }
+
+    /// Override the cache-write tier every launched turn requests.
+    /// Without an override, Claude Code keeps its native cache settings.
+    pub fn with_prompt_cache_ttl(mut self, ttl: aether_core::model::PromptCacheTtl) -> Self {
+        self.prompt_cache_ttl = Some(ttl);
+        self
+    }
+
+    /// Find `claude` on PATH and read its version. `Err` names why the CLI
+    /// could not be started or read at all; see [`DetectError`]. A version
+    /// below [`MIN_VERSION`] still registers - see [`Self::limitation`].
+    pub async fn detect_verbose() -> Result<Self, DetectError> {
+        Self::detect_verbose_on(None).await
+    }
+
+    /// `detect_verbose`, optionally searching `path` instead of the process's
+    /// own `PATH` - the seam a test drives with a fake `claude` on a temp dir.
+    async fn detect_verbose_on(path: Option<&std::path::Path>) -> Result<Self, DetectError> {
+        let version = detect::probe_version("claude", path).await?;
+        Ok(Self::new("claude", version.to_string()))
+    }
+
+    /// Known offline-sandbox gaps; online turns remain available.
+    /// This only checks the version and executable presence on PATH.
+    pub fn limitation(&self) -> Option<String> {
+        self.limitation_on(std::env::var_os("PATH").as_deref())
+    }
+
+    fn limitation_on(&self, path: Option<&std::ffi::OsStr>) -> Option<String> {
+        let mut limitations = Vec::new();
+        if let Some(version) = EngineVersion::parse(&self.version)
+            && version < MIN_VERSION
+        {
+            limitations.push(format!(
+                "network-denied turns require claude >= {MIN_VERSION} (found {version})"
+            ));
+        }
+        if let Some(reason) =
+            offline::dependency_limitation("Claude", |program| executable_on_path(program, path))
+        {
+            limitations.push(reason);
+        }
+        (!limitations.is_empty()).then(|| limitations.join("; "))
+    }
+
+    fn validate_offline_support(
+        &self,
+        has_executable: impl Fn(&str) -> bool,
+    ) -> Result<(), EngineError> {
+        let supported = EngineVersion::parse(&self.version).is_some_and(|v| v >= MIN_VERSION);
+        if !supported {
+            return Err(EngineError::Unsupported("Network-denied Claude turns require Claude Code 2.1.219 or newer for strict sandbox network enforcement".into()));
+        }
+        if let Some(reason) = offline::dependency_limitation("Claude", has_executable) {
+            return Err(EngineError::Unsupported(reason));
+        }
+        Ok(())
+    }
+
+    pub fn args(&self, turn: &EngineTurn) -> Vec<String> {
+        let mut args: Vec<String> = vec![
+            "-p".into(),
+            "--input-format".into(),
+            "stream-json".into(),
+            "--output-format".into(),
+            "stream-json".into(),
+            "--verbose".into(),
+            "--include-partial-messages".into(),
+            "--replay-user-messages".into(),
+            "--disallowedTools".into(),
+            if turn.network_access {
+                NATIVE_COORDINATION_TOOLS.to_owned()
+            } else {
+                format!("{NATIVE_COORDINATION_TOOLS},WebSearch,WebFetch")
+            },
+        ];
+        if turn.summary_only {
+            args.extend([
+                "--tools".into(),
+                "".into(),
+                "--strict-mcp-config".into(),
+                "--disable-slash-commands".into(),
+            ]);
+        }
+        let mut settings = json!({"env": {}});
+        if let Some(ttl) = self.prompt_cache_ttl {
+            settings["env"]["CLAUDE_CODE_PROMPT_CACHE_TTL"] = json!(ttl.as_str());
+        }
+        // Hooks can perform their own I/O outside the requested sandbox.
+        if turn.summary_only || !turn.network_access {
+            settings["disableAllHooks"] = json!(true);
+        }
+        if !turn.summary_only && !turn.network_access {
+            // Inherited exclusions and MCP servers can escape the sandbox.
+            args.extend([
+                "--setting-sources".into(),
+                "".into(),
+                "--strict-mcp-config".into(),
+            ]);
+            settings["sandbox"] = json!({
+                "enabled": true,
+                "failIfUnavailable": true,
+                "allowUnsandboxedCommands": false,
+                "network": {"strictAllowlist": true, "allowedDomains": [], "deniedDomains": ["*"]}
+            });
+            settings["permissions"] = json!({"deny": ["WebFetch(domain:*)", "WebSearch"]});
+        }
+        args.extend(["--settings".into(), settings.to_string()]);
+        if !turn.system_prompt.trim().is_empty() {
+            args.push(if turn.summary_only {
+                "--system-prompt".into()
+            } else {
+                "--append-system-prompt".into()
+            });
+            args.push(turn.system_prompt.clone());
+        }
+        match &turn.session {
+            Some(id) => {
+                args.push("--resume".into());
+                args.push(id.clone());
+            }
+            None => {
+                args.push("--session-id".into());
+                args.push(turn.new_session_id.clone());
+            }
+        }
+        if let Some(model) = turn.model.as_deref().filter(|m| *m != "default") {
+            args.push("--model".into());
+            args.push(model.to_owned());
+        }
+        if let Some(effort) = turn.effort {
+            args.push("--effort".into());
+            args.push(effort.as_str().into());
+        }
+        if turn.bypass_permissions {
+            args.push("--permission-mode".into());
+            args.push("bypassPermissions".into());
+        } else {
+            args.push("--permission-mode".into());
+            args.push("default".into());
+            if turn.mcp.is_some() {
+                args.push("--permission-prompt-tool".into());
+                args.push("mcp__aether__permission".into());
+                args.push("--permission-prompts".into());
+                args.push("host".into());
+            }
+        }
+        if let Some(mcp) = &turn.mcp {
+            // Coordination must be available when the first prompt is built.
+            // Other native MCP servers keep their own tool-search settings.
+            let config = json!({
+                "mcpServers": {
+                    "aether": {
+                        "command": mcp.command.to_string_lossy(),
+                        "args": mcp.args,
+                        "alwaysLoad": true
+                    }
+                }
+            });
+            args.push("--mcp-config".into());
+            args.push(config.to_string());
+        }
+        for dir in &turn.extra_dirs {
+            args.push("--add-dir".into());
+            args.push(dir.to_string_lossy().into_owned());
+        }
+        args
+    }
+}
+
+/// A user message in Claude Code's stream-json input format.
+pub fn user_message_line(text: &str) -> String {
+    let line = serde_json::json!({
+        "type": "user",
+        "message": {"role": "user", "content": [{"type": "text", "text": text}]}
+    });
+    format!("{line}\n")
+}
+
+#[async_trait::async_trait]
+impl Engine for ClaudeCodeEngine {
+    fn kind(&self) -> EngineKind {
+        EngineKind::CLAUDE_CODE
+    }
+
+    fn adapter(&self) -> String {
+        format!("claude-code/{}", self.version)
+    }
+
+    fn validate_network_policy(&self, network_access: bool) -> Result<(), EngineError> {
+        if network_access {
+            return Ok(());
+        }
+        let path = std::env::var_os("PATH");
+        self.validate_offline_support(|program| executable_on_path(program, path.as_deref()))
+    }
+
+    async fn run(
+        &self,
+        turn: EngineTurn,
+        cancel: CancellationToken,
+    ) -> Result<EngineRun, EngineError> {
+        if !turn.summary_only {
+            self.validate_network_policy(turn.network_access)?;
+        }
+        let args = self.args(&turn);
+        let cwd: PathBuf = turn.cwd.clone();
+        let mut state = ParseState::awaiting_prompt(&turn.prompt)
+            .with_session_cost(turn.session.clone(), turn.session_usage);
+        let outstanding = state.outstanding.clone();
+        let mut run = run_process(
+            &self.program,
+            args,
+            cwd,
+            &turn.hidden_env,
+            user_message_line(&turn.prompt),
+            true,
+            Some(input::interrupt_line()),
+            cancel,
+            move |line| parse_line(line, &mut state),
+        )
+        .await?;
+        // Texts become stream-json lines; each is remembered until the CLI
+        // echoes it back, which is when it reached the model.
+        let Some(stdin) = run.input.take() else {
+            return Ok(run);
+        };
+        let (input_tx, stop_tx) = input::spawn(stdin, outstanding);
+        run.input = Some(input_tx);
+        run.stop = Some(stop_tx);
+        Ok(run)
+    }
+}
+
+mod input;
+mod session_cost;
+mod stream;
+pub use stream::{ParseState, parse_line};
+
+#[cfg(test)]
+#[path = "claude_code/tests/launch.rs"]
+mod tests;

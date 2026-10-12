@@ -1,0 +1,147 @@
+//! scheduled state scenarios and fixtures.
+use super::*;
+
+#[tokio::test]
+async fn scheduled_wake_survives_restart_and_explains_why_it_woke() {
+    let at = now() + chrono::Duration::hours(1);
+    let h = harness(vec![ScriptedClient::tool_call(
+        "wait_for",
+        json!({"wake_at":at.to_rfc3339()}),
+    )])
+    .await;
+    let (agent, _) = h
+        .runtime
+        .create_agent(spec("follow up later"), Actor::user())
+        .unwrap();
+    h.wait_until(agent.id, |s| matches!(s, AgentStatus::Waiting { .. }))
+        .await;
+    h.runtime.shutdown().await;
+    let parked = h.store.agent(agent.id).unwrap().unwrap();
+    assert!(
+        matches!(&parked.status, AgentStatus::Waiting { condition } if condition.earliest_deadline() == Some(at))
+    );
+    let restarted = harness_full(
+        vec![],
+        |_| {},
+        |_| {},
+        None,
+        None,
+        Some(h.store.clone()),
+        |_| {},
+    )
+    .await;
+    assert_eq!(
+        restarted.store.agent(agent.id).unwrap().unwrap().status,
+        parked.status
+    );
+    restarted.runtime.shutdown().await;
+    let mut due = parked;
+    due.status = AgentStatus::Waiting {
+        condition: aether_core::agent::WaitCondition::Any {
+            of: vec![
+                aether_core::agent::WaitCondition::Inbox,
+                aether_core::agent::WaitCondition::Deadline {
+                    at: now() - chrono::Duration::seconds(1),
+                },
+            ],
+        },
+    };
+    h.store
+        .commit(Commit::new().mutate(Mutation::UpsertAgent(due)))
+        .unwrap();
+    let resumed = harness_full(
+        vec![ScriptedClient::tool_call(
+            "complete_task",
+            json!({"summary":"follow-up done"}),
+        )],
+        |_| {},
+        |_| {},
+        None,
+        None,
+        Some(h.store.clone()),
+        |_| {},
+    )
+    .await;
+    resumed.wait_until(agent.id, |s| s.is_terminal()).await;
+    let requests = resumed.client.requests();
+    assert!(
+        requests
+            .iter()
+            .flat_map(|r| r.messages.iter())
+            .any(|m| m.text().contains("requested wake time has arrived"))
+    );
+}
+
+#[tokio::test]
+async fn state_tools_report_runtime_facts_without_mutating_task_state() {
+    let h = harness(vec![
+        ScriptedClient::tool_call("inspect_state", json!({})),
+        ScriptedClient::tool_call("list_models", json!({"provider":"codex"})),
+        ScriptedClient::tool_call("complete_task", json!({"summary":"done"})),
+    ])
+    .await;
+    let (agent, _) = h
+        .runtime
+        .create_agent(spec("inspect the harness"), Actor::user())
+        .unwrap();
+    h.wait_until(agent.id, |s| s.is_terminal()).await;
+    let outputs: Vec<_> = h
+        .store
+        .events(0, 10_000, &EventFilter::for_agent(agent.id))
+        .unwrap()
+        .into_iter()
+        .filter_map(|e| match e.kind {
+            EventKind::ToolSucceeded { outcome, .. } => outcome.structured,
+            _ => None,
+        })
+        .collect();
+    let state = outputs
+        .iter()
+        .find(|v| v.get("compaction").is_some())
+        .expect("state result");
+    assert_eq!(state["model"], json!(agent.model));
+    assert_eq!(state["compaction"]["pressure_threshold_percent"], 75);
+    assert_eq!(state["compaction"]["effort"], "medium");
+    let catalog = outputs
+        .iter()
+        .find(|v| v.get("models").is_some())
+        .expect("catalog result");
+    assert!(!catalog["models"].as_array().unwrap().is_empty());
+    let models = catalog["models"].as_array().unwrap();
+    assert_eq!(models[0]["model"]["model"], "gpt-6-astra");
+    assert_eq!(models[1]["model"]["model"], "gpt-6.1-sol");
+    assert_eq!(models[2]["model"]["model"], "gpt-6-luna");
+    assert_eq!(models[1]["api_equivalent_cost"]["input_per_mtok"], 2.0);
+    assert!(
+        catalog["guidance"]
+            .as_str()
+            .unwrap()
+            .contains("capability first")
+    );
+    assert!(
+        catalog["models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|m| m["model"]["provider"] == "codex")
+    );
+    assert!(catalog["providers"]["codex"]["configured"].is_boolean());
+    for model in catalog["models"].as_array().unwrap() {
+        assert_eq!(
+            model["configured"],
+            catalog["providers"]["codex"]["configured"]
+        );
+        assert!(model["provider_name"].is_string());
+    }
+    for alternative in catalog["configured_alternatives"].as_array().unwrap() {
+        assert_eq!(alternative["configured"], true);
+        assert_ne!(alternative["model"]["provider"], "codex");
+        assert!(
+            catalog["models"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|model| model["name"] == alternative["name"])
+        );
+    }
+}

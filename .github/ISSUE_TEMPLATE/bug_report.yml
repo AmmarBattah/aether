@@ -1,0 +1,68 @@
+name: Bug report
+description: Something in Aether does not work as documented
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this.
+
+        **Do not report a vulnerability here.** Use the private route in
+        [SECURITY.md](https://github.com/mengsig/aether/blob/main/SECURITY.md).
+
+        Remove API keys, tokens and private paths from anything you paste.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: The smallest sequence of commands or prompts that shows the problem.
+      placeholder: |
+        1. aether run ...
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Aether version
+      description: Output of `aether --version`, or the commit you built from.
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Operating system
+      placeholder: Ubuntu 24.04 x86_64, macOS 15 arm64, ...
+    validations:
+      required: true
+  - type: input
+    id: engine
+    attributes:
+      label: Engine or provider
+      description: Claude Code, Codex or an API provider, with the model and the CLI version if one is involved.
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and diagnostics
+      description: Error text, or the relevant part of an `aether diagnose` bundle. Check it for private data first.
+      render: text
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the open issues and the known limitations (`docs/known-limitations.md`).
+          required: true
+        - label: This report contains no credentials, tokens or private data.
+          required: true

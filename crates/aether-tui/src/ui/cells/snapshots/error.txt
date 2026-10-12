@@ -1,0 +1,32 @@
+── unicode 80 compact
+✗ Turn failed
+  └ the engine exited with status 1 before producing a reply
+    /restart aether
+── unicode 80 detail
+✗ Turn failed
+  └ the engine exited with status 1 before producing a reply
+    /restart aether
+── unicode 120 compact
+✗ Turn failed
+  └ the engine exited with status 1 before producing a reply
+    /restart aether
+── unicode 120 detail
+✗ Turn failed
+  └ the engine exited with status 1 before producing a reply
+    /restart aether
+── ascii 80 compact
+x Turn failed
+  \ the engine exited with status 1 before producing a reply
+    /restart aether
+── ascii 80 detail
+x Turn failed
+  \ the engine exited with status 1 before producing a reply
+    /restart aether
+── ascii 120 compact
+x Turn failed
+  \ the engine exited with status 1 before producing a reply
+    /restart aether
+── ascii 120 detail
+x Turn failed
+  \ the engine exited with status 1 before producing a reply
+    /restart aether

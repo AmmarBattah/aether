@@ -1,0 +1,16 @@
+── unicode 80 compact
+• Fetched lwn.net/Articles/457667
+── unicode 80 detail
+• Fetched lwn.net/Articles/457667
+── unicode 120 compact
+• Fetched lwn.net/Articles/457667
+── unicode 120 detail
+• Fetched lwn.net/Articles/457667
+── ascii 80 compact
+* Fetched lwn.net/Articles/457667
+── ascii 80 detail
+* Fetched lwn.net/Articles/457667
+── ascii 120 compact
+* Fetched lwn.net/Articles/457667
+── ascii 120 detail
+* Fetched lwn.net/Articles/457667

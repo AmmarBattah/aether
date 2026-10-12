@@ -1,0 +1,94 @@
+[
+  {
+    "name": "cross-provider-documentation-review",
+    "model": "codex/gpt-6-luna",
+    "prompt": "Can you spawn two sonnet-5.5 sub agents to look at the documentation?",
+    "children": {
+      "count": 2,
+      "provider": "claude-code",
+      "model": "sonnet"
+    }
+  },
+  {
+    "name": "sol-luna-hierarchy",
+    "model": "codex/gpt-6.1-sol",
+    "prompt": "Hey, please spawn 3 subagents with sol that have small tasks, then have each of them spawn 3 subagents each that also have small tasks. Make the sub sub agents be luna low.. Make sure to use the aether agents.",
+    "children": {
+      "count": 3,
+      "provider": "codex",
+      "model": "gpt-6.1-sol"
+    },
+    "grandchildren_per_child": {
+      "count": 3,
+      "provider": "codex",
+      "model": "gpt-6-luna",
+      "effort": "low"
+    }
+  },
+  {
+    "name": "mixed-provider-deep-tree",
+    "model": "codex/gpt-6.1-sol",
+    "prompt": "Have a few Sol agents check the documentation. Give each of them a couple of Luna low subagents, and have every Luna spawn one Sonnet subagent for a tiny documentation check. This is just to validate that the whole tree works. Let them finish and tell me what they found.",
+    "tree": {
+      "min_count": 2,
+      "max_count": 4,
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "children": {
+        "count": 2,
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "effort": "low",
+        "children": {
+          "count": 1,
+          "provider": "claude-code",
+          "model": "sonnet"
+        }
+      }
+    }
+  },
+  {
+    "name": "start-four-parallel-researchers-luna",
+    "source": "the original report",
+    "assertion": "4 children created on codex/gpt-6-luna (the model resolves to the parent's own engine, not an unusable OpenAI API ref), zero failed tool calls",
+    "mock": false,
+    "mock_reason": "the mock is a pattern matcher whose verdict is always neutral; this case turns on a real coordinator's own judgement resolving a bare model name to its own engine, which the mock cannot exercise",
+    "model": "codex/gpt-6.1-sol",
+    "prompt": "start 4 parallel researchers, use luna agents",
+    "children": {
+      "count": 4,
+      "provider": "codex",
+      "model": "gpt-6-luna"
+    }
+  },
+  {
+    "name": "no-delegation-tool-available",
+    "source": "results/natural-language-baseline-2026-09-08.json records two distinct zero-children failures on this exact prompt/model/effort: (1) 'I can't spawn sub-agents in this session because no Aether delegation tool is available' (build 6eea15c); (2) an experimental MCP inventory preflight build that queried only the unconfigured anthropic connection, made 2 rejected delegate attempts, and claimed Sonnet 5 unavailable. Both observations recorded the identical prompt, so they are kept as one case.",
+    "assertion": "children created (2, claude-code/sonnet), zero failed tool calls - not either previously observed zero-children failure ('no Aether delegation tool is available', or querying only the unconfigured anthropic connection and claiming Sonnet unavailable)",
+    "mock": false,
+    "mock_reason": "the mock is a pattern matcher whose verdict is always neutral; this case turns on the coordinator's own judgement of tool/connection availability, which the mock cannot exercise",
+    "model": "codex/gpt-6-luna",
+    "effort": "low",
+    "prompt": "Can you spawn two sonnet-5.5 sub agents to look at the documentation?",
+    "children": {
+      "count": 2,
+      "provider": "claude-code",
+      "model": "sonnet"
+    }
+  },
+  {
+    "name": "ordinary-language-checkpoint-request",
+    "source": "ordinary-language checkpoint acceptance belongs in a live NL eval, not a scripted kernel test: the ScriptedClient-based kernel.rs test ordinary_language_checkpoint_request_carries_summary_forward could not observe the user's prose and was deleted.",
+    "assertion": "checkpoint.created fires, and the very next snapshot.created event for the root renders a non-empty checkpoint layer - proof the summary reached the next turn's prompt, not just that a checkpoint record was written",
+    "mock": false,
+    "mock_reason": "the mock is a pattern matcher whose verdict is always neutral; this case turns on a real coordinator reading plain language (no tool name, no mention of 'compact') as a checkpoint request, which the mock cannot exercise",
+    "model": "codex/gpt-6-luna",
+    "prompt": "This conversation is getting long - could you sum up where things stand so nothing gets lost, and then keep going? Don't spawn any sub agents for this.",
+    "children": {
+      "count": 0,
+      "provider": "codex",
+      "model": "gpt-6-luna"
+    },
+    "events_required": ["checkpoint.created"]
+  }
+]

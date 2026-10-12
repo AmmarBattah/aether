@@ -1,0 +1,68 @@
+── unicode 80 compact
+• Called github.search_issues({"q":"wal sync"})
+  └ issue 1
+    issue 2
+    … +2 lines (ctrl+t to view)
+    issue 5
+    issue 6
+    issue 7
+── unicode 80 detail
+• Called github.search_issues({"q":"wal sync"})
+  └ issue 1
+    issue 2
+    issue 3
+    issue 4
+    issue 5
+    issue 6
+    issue 7
+── unicode 120 compact
+• Called github.search_issues({"q":"wal sync"})
+  └ issue 1
+    issue 2
+    … +2 lines (ctrl+t to view)
+    issue 5
+    issue 6
+    issue 7
+── unicode 120 detail
+• Called github.search_issues({"q":"wal sync"})
+  └ issue 1
+    issue 2
+    issue 3
+    issue 4
+    issue 5
+    issue 6
+    issue 7
+── ascii 80 compact
+* Called github.search_issues({"q":"wal sync"})
+  \ issue 1
+    issue 2
+    ~ +2 lines (ctrl+t to view)
+    issue 5
+    issue 6
+    issue 7
+── ascii 80 detail
+* Called github.search_issues({"q":"wal sync"})
+  \ issue 1
+    issue 2
+    issue 3
+    issue 4
+    issue 5
+    issue 6
+    issue 7
+── ascii 120 compact
+* Called github.search_issues({"q":"wal sync"})
+  \ issue 1
+    issue 2
+    ~ +2 lines (ctrl+t to view)
+    issue 5
+    issue 6
+    issue 7
+── ascii 120 detail
+* Called github.search_issues({"q":"wal sync"})
+  \ issue 1
+    issue 2
+    issue 3
+    issue 4
+    issue 5
+    issue 6
+    issue 7

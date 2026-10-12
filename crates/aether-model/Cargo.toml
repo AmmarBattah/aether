@@ -1,0 +1,41 @@
+[package]
+name = "aether-model"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "API providers, authentication, model registry and configuration for the Aether agent harness"
+
+[lints]
+workspace = true
+
+[dependencies]
+aether-core = { workspace = true }
+reqwest = { workspace = true }
+http = "1.5.0"
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+async-trait = { workspace = true }
+url = { workspace = true }
+base64 = { workspace = true }
+sha2 = { workspace = true }
+rand = { workspace = true }
+hex = { workspace = true }
+dirs = { workspace = true }
+toml = { workspace = true }
+open = { workspace = true }
+bytes = { workspace = true }
+tokio-util = { workspace = true }
+rpassword = "7.5.4"
+tempfile = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }

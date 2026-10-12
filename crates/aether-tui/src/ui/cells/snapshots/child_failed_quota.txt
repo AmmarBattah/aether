@@ -1,0 +1,32 @@
+── unicode 80 compact
+• tester [worker] failed · anthropic weekly limit · 12s
+  └ provider rejected the request: weekly limit reached
+    /wake tester · /restart tester
+── unicode 80 detail
+• tester [worker] failed · anthropic weekly limit · 12s
+  └ provider rejected the request: weekly limit reached
+    /wake tester · /restart tester
+── unicode 120 compact
+• tester [worker] failed · anthropic weekly limit · 12s
+  └ provider rejected the request: weekly limit reached
+    /wake tester · /restart tester
+── unicode 120 detail
+• tester [worker] failed · anthropic weekly limit · 12s
+  └ provider rejected the request: weekly limit reached
+    /wake tester · /restart tester
+── ascii 80 compact
+* tester [worker] failed | anthropic weekly limit | 12s
+  \ provider rejected the request: weekly limit reached
+    /wake tester | /restart tester
+── ascii 80 detail
+* tester [worker] failed | anthropic weekly limit | 12s
+  \ provider rejected the request: weekly limit reached
+    /wake tester | /restart tester
+── ascii 120 compact
+* tester [worker] failed | anthropic weekly limit | 12s
+  \ provider rejected the request: weekly limit reached
+    /wake tester | /restart tester
+── ascii 120 detail
+* tester [worker] failed | anthropic weekly limit | 12s
+  \ provider rejected the request: weekly limit reached
+    /wake tester | /restart tester

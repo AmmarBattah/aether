@@ -1,0 +1,45 @@
+[package]
+name = "aether-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Scheduler, turns, delegation, recovery and external events for the Aether agent harness"
+
+[lints]
+workspace = true
+
+[dependencies]
+aether-core = { workspace = true }
+aether-store = { workspace = true }
+aether-model = { workspace = true }
+aether-tools = { workspace = true }
+aether-context = { workspace = true }
+aether-memory = { workspace = true }
+aether-engine = { workspace = true }
+base64 = { workspace = true }
+ulid = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+futures = { workspace = true }
+async-trait = { workspace = true }
+parking_lot = { workspace = true }
+rand = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+regex = "1.13.1"
+nix = { workspace = true }
+fs4 = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+async-trait = { workspace = true }
+rusqlite = { workspace = true }
+tempfile = { workspace = true }

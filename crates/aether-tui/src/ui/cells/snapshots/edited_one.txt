@@ -1,0 +1,48 @@
+── unicode 80 compact
+• Edited crates/aether-store/src/wal.rs (+2 -1)
+  └  42 -    self.file.sync_all()?;
+     42 +    self.pending = true;
+     43 +    self.notify.notify_one();
+── unicode 80 detail
+• Edited crates/aether-store/src/wal.rs (+2 -1)
+  └  41  fn commit(&mut self) {
+     42 -    self.file.sync_all()?;
+     42 +    self.pending = true;
+     43 +    self.notify.notify_one();
+     44  }
+── unicode 120 compact
+• Edited crates/aether-store/src/wal.rs (+2 -1)
+  └  42 -    self.file.sync_all()?;
+     42 +    self.pending = true;
+     43 +    self.notify.notify_one();
+── unicode 120 detail
+• Edited crates/aether-store/src/wal.rs (+2 -1)
+  └  41  fn commit(&mut self) {
+     42 -    self.file.sync_all()?;
+     42 +    self.pending = true;
+     43 +    self.notify.notify_one();
+     44  }
+── ascii 80 compact
+* Edited crates/aether-store/src/wal.rs (+2 -1)
+  \  42 -    self.file.sync_all()?;
+     42 +    self.pending = true;
+     43 +    self.notify.notify_one();
+── ascii 80 detail
+* Edited crates/aether-store/src/wal.rs (+2 -1)
+  \  41  fn commit(&mut self) {
+     42 -    self.file.sync_all()?;
+     42 +    self.pending = true;
+     43 +    self.notify.notify_one();
+     44  }
+── ascii 120 compact
+* Edited crates/aether-store/src/wal.rs (+2 -1)
+  \  42 -    self.file.sync_all()?;
+     42 +    self.pending = true;
+     43 +    self.notify.notify_one();
+── ascii 120 detail
+* Edited crates/aether-store/src/wal.rs (+2 -1)
+  \  41  fn commit(&mut self) {
+     42 -    self.file.sync_all()?;
+     42 +    self.pending = true;
+     43 +    self.notify.notify_one();
+     44  }

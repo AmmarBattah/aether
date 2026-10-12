@@ -1,0 +1,28 @@
+── unicode 80 compact
+• Ran python3 -c "print(17*23)"
+  └ 391
+── unicode 80 detail
+• Ran /usr/bin/zsh -lc 'python3 -c "print(17*23)"'
+  └ 391
+    ✓ exit 0 • 80ms
+── unicode 120 compact
+• Ran python3 -c "print(17*23)"
+  └ 391
+── unicode 120 detail
+• Ran /usr/bin/zsh -lc 'python3 -c "print(17*23)"'
+  └ 391
+    ✓ exit 0 • 80ms
+── ascii 80 compact
+* Ran python3 -c "print(17*23)"
+  \ 391
+── ascii 80 detail
+* Ran /usr/bin/zsh -lc 'python3 -c "print(17*23)"'
+  \ 391
+    + exit 0 * 80ms
+── ascii 120 compact
+* Ran python3 -c "print(17*23)"
+  \ 391
+── ascii 120 detail
+* Ran /usr/bin/zsh -lc 'python3 -c "print(17*23)"'
+  \ 391
+    + exit 0 * 80ms

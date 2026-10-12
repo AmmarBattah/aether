@@ -1,0 +1,53 @@
+name: ci-macos
+
+# The whole of scripts/ci.sh on macOS. Opt-in, because macOS minutes cost far
+# more than Linux ones: a maintainer adds the ci:macos label to a pull request
+# or dispatches this workflow. It is apart from ci.yml so that a label starts
+# this job and nothing else.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Another label than ci:macos starts nothing, so it gets a group of its own
+# and cancels no macOS run that is in progress.
+concurrency:
+  group: ci-macos-${{ github.ref }}-${{ github.event.action == 'labeled' && github.event.label.name != 'ci:macos' && github.run_id || 'run' }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  # With full debug info the debug test binaries outgrow a hosted runner's disk.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+
+jobs:
+  macos:
+    # A new label runs it only when that label is ci:macos; a push to a pull
+    # request runs it while the label is on.
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || (github.event.action == 'labeled' && github.event.label.name == 'ci:macos')
+      || (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'ci:macos'))
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: install the Rust toolchain pinned by rust-toolchain.toml
+        run: |
+          channel=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)
+          rustup toolchain install "$channel" --profile minimal --component clippy --component rustfmt
+          cargo --version
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: ./scripts/ci.sh

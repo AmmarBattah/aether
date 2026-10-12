@@ -1,0 +1,16 @@
+── unicode 80 compact
+◆ Wants to run git push origin main
+── unicode 80 detail
+◆ Wants to run git push origin main
+── unicode 120 compact
+◆ Wants to run git push origin main
+── unicode 120 detail
+◆ Wants to run git push origin main
+── ascii 80 compact
+! Wants to run git push origin main
+── ascii 80 detail
+! Wants to run git push origin main
+── ascii 120 compact
+! Wants to run git push origin main
+── ascii 120 detail
+! Wants to run git push origin main

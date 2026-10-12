@@ -1,0 +1,4 @@
+• Delegated to tester: Verify the readiness fix
+• To tester: Include the isolated test
+• From tester: Isolated test passed; full CI next
+• tester finished: CI passed; ready for approval

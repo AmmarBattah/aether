@@ -1,0 +1,16 @@
+── unicode 80 compact
+◆ Wants to fetch example.com/changelog
+── unicode 80 detail
+◆ Wants to fetch example.com/changelog
+── unicode 120 compact
+◆ Wants to fetch example.com/changelog
+── unicode 120 detail
+◆ Wants to fetch example.com/changelog
+── ascii 80 compact
+! Wants to fetch example.com/changelog
+── ascii 80 detail
+! Wants to fetch example.com/changelog
+── ascii 120 compact
+! Wants to fetch example.com/changelog
+── ascii 120 detail
+! Wants to fetch example.com/changelog

@@ -1,0 +1,29 @@
+/target
+**/*.rs.bk
+*.db
+*.db-wal
+*.db-shm
+/.aether
+# Local shell captures, review pages, and generated evaluation runs.
+/.aether-shell-*/
+/.lavish/
+/evals/results/
+*.pdf
+/.navgraph
+/evals/.venv
+__pycache__/
+*.pyc
+node_modules/
+# Editor and operating-system files.
+.DS_Store
+*.swp
+*~
+/.idea/
+/.vscode/
+# Local environment files and Python tool caches.
+.env
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/

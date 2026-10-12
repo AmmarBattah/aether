@@ -1,0 +1,23 @@
+[
+  {
+    "id": "fix_bug",
+    "objective": "The test suite in this Python project fails. Find the bug and fix it so that `python3 -m pytest -q` passes. Do not modify the tests.",
+    "check": "python3 -m pytest -q >/dev/null 2>&1",
+    "tests_frozen": true
+  },
+  {
+    "id": "add_function",
+    "objective": "Add a function `slugify(text)` to utils.py that lowercases the text, replaces runs of non-alphanumeric characters with a single hyphen, and strips leading/trailing hyphens. Add tests for it in tests/test_utils.py. Make sure `python3 -m pytest -q` passes.",
+    "check": "grep -q 'def slugify' utils.py && grep -q 'slugify' tests/test_utils.py && python3 -c \"from utils import slugify; assert slugify('Hello, World!') == 'hello-world'; assert slugify('  A  B  ') == 'a-b'\" && python3 -m pytest -q >/dev/null 2>&1"
+  },
+  {
+    "id": "rename",
+    "objective": "Rename the function `calc` to `total` everywhere in this project (definition, imports and all call sites, including tests). `python3 -m pytest -q` must still pass and no reference to `calc` may remain.",
+    "check": "! grep -rq '\\bcalc\\b' --include='*.py' . && grep -q 'def total' utils.py && python3 -m pytest -q >/dev/null 2>&1"
+  },
+  {
+    "id": "readme",
+    "objective": "Write a concise README.md for this project describing what utils.py and stats.py provide and how to run the tests.",
+    "check": "test -f README.md && grep -qi 'utils' README.md && grep -qi 'stats' README.md && grep -qi 'pytest' README.md"
+  }
+]

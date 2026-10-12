@@ -1,0 +1,16 @@
+── unicode 80 compact
+• Waited 4m 51s for researcher
+── unicode 80 detail
+• Waited 4m 51s for researcher
+── unicode 120 compact
+• Waited 4m 51s for researcher
+── unicode 120 detail
+• Waited 4m 51s for researcher
+── ascii 80 compact
+* Waited 4m 51s for researcher
+── ascii 80 detail
+* Waited 4m 51s for researcher
+── ascii 120 compact
+* Waited 4m 51s for researcher
+── ascii 120 detail
+* Waited 4m 51s for researcher

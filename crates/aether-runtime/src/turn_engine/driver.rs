@@ -1,0 +1,718 @@
+//! Native engine driver.
+use super::{
+    Arc, BACKGROUND_GRACE, BTreeSet, BusMessage, CancellationToken, Commit, ContentBlock, Crossed,
+    DeltaKind, Engine, EngineEvent, EngineOutcome, EngineRequest, EngineTurn, EventKind,
+    GateSubject, InvocationSnapshot, MAX_BACKGROUND_IDS, MAX_ENGINE_NAME, MessageRole, Park,
+    PermissionDecision, REFUSAL_GRACE, ReapGrace, ResolvedModel, Result, Runtime, STEER_GRACE,
+    Served, Steering, StreamState, SubtreeUsage, TURN_IS_OVER, ToolContext, ToolEffects, TurnCtx,
+    TurnPricing, Usage, Verdict, answer_question, budget_crossed, budget_outcome, clamp,
+    disallowed_native_spawn_tool, gated_call, handle_event, handle_request, json, mpsc,
+    names_exhaustion, park_grace, permission_verdict, raise_to, record_consumed,
+    record_refused_call, refusal, side_effect_of, start_park, steer, stop_for_crossing, stopping,
+};
+
+/// Legacy per-message streams use turn totals as a fallback. Incremental
+/// billing streams retain a baseline so final CLI totals replace only this
+/// run's provisional accounting.
+pub(super) struct DriveResult {
+    pub(super) outcome: EngineOutcome,
+    /// Streamed content, tool/bridge activity or steering prevents replay.
+    pub(super) activity_seen: bool,
+    /// Present when a harness action ended the turn while the engine was
+    /// still running: how the wind-down went.
+    pub(super) park: Option<Park>,
+    /// An invocation this turn carried a cost from the registry's price.
+    pub(super) priced: bool,
+    /// Per-message usage arrived, so the turn's tokens are already counted.
+    pub(super) usage_seen: bool,
+    /// The model answered at least once, so this turn recorded an invocation.
+    pub(super) invoked: bool,
+    /// The model called at least one tool this turn.
+    pub(super) ran_tools: bool,
+    /// Present only for incremental billing; previous runs must survive reconciliation.
+    pub(super) usage_before: Option<(Usage, Usage)>,
+    pub(super) stream_usage: Usage,
+    pub(super) request_usage_seen: bool,
+    /// The grant this run crossed while it ran. The turn ends as a budget
+    /// stop, not as an engine failure.
+    pub(super) budget_stop: Option<Crossed>,
+    /// This run's configured or session-reported price, retained for non-request
+    /// streams that estimate their closing counters rather than each request.
+    pub(super) pricing: TurnPricing,
+    /// The failed run's process was seen to exit, or never started: its
+    /// session is free for another run to resume.
+    pub(super) cleaned_up: bool,
+}
+
+fn event_has_activity(event: &EngineEvent, ctx: &TurnCtx) -> bool {
+    match event {
+        EngineEvent::Session { .. }
+        | EngineEvent::ContextUsage { .. }
+        | EngineEvent::RateLimit { .. }
+        | EngineEvent::Note(_)
+        | EngineEvent::ProtocolNote(_)
+        | EngineEvent::Done(_) => false,
+        EngineEvent::SessionUsage { session, total } => {
+            let mut baseline = ctx
+                .agent
+                .engine_usage
+                .as_ref()
+                .filter(|usage| &usage.session == session)
+                .map(|usage| usage.total)
+                .unwrap_or_default();
+            // A receipt's price-source label alone is not model activity.
+            baseline.cost_basis = total.cost_basis;
+            *total != baseline
+        }
+        _ => true,
+    }
+}
+
+impl DriveResult {
+    pub(super) fn unanswered(&self) -> bool {
+        !self.activity_seen
+            && !self.invoked
+            && !self.ran_tools
+            && !self.usage_seen
+            && self
+                .outcome
+                .text
+                .as_deref()
+                .is_none_or(|text| text.is_empty())
+            && self.outcome.usage.total_tokens() == 0
+            && self
+                .outcome
+                .usage
+                .reasoning_tokens
+                .is_none_or(|tokens| tokens == 0)
+            && self.outcome.cost_usd.is_none_or(|cost| cost == 0.0)
+            && self.outcome.usage.cost_usd == 0.0
+            && self
+                .outcome
+                .usage
+                .estimated_cost_usd
+                .is_none_or(|cost| cost == 0.0)
+    }
+}
+
+/// Run the engine once and pump its events and bridge requests until it
+/// reports an outcome.
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn drive(
+    runtime: &Arc<Runtime>,
+    ctx: &mut TurnCtx,
+    engine: &dyn Engine,
+    turn: EngineTurn,
+    snapshot: &InvocationSnapshot,
+    tool_ctx: &Arc<ToolContext>,
+    req_rx: &mut mpsc::Receiver<EngineRequest>,
+    effects: &mut ToolEffects,
+    resolved: &ResolvedModel,
+    cancel: &CancellationToken,
+) -> Result<DriveResult> {
+    // The registry's price is the cost authority when it has one, exactly as
+    // on the API path. The engine's own turn total is the fallback, so a
+    // model the registry cannot price reports no cost rather than a
+    // made-up one - and where the registry knows the API model behind the
+    // subscription, an API-equivalent estimate rides alongside it. A `default`
+    // model the registry cannot price at all is repriced once the session
+    // says which model the CLI picked.
+    let pricing = TurnPricing::of(runtime, resolved);
+    // Subscribed before the engine starts so nothing delivered meanwhile is missed.
+    let mut bus = runtime.bus.subscribe();
+    // Bound, not thrown away: a detected kill-switch bypass below needs to
+    // cancel the process this token was given to, not just close its stdin.
+    let engine_cancel = cancel.child_token();
+    let mut run = match engine.run(turn, engine_cancel.clone()).await {
+        Ok(r) => r,
+        Err(e) => {
+            return Ok(DriveResult {
+                outcome: EngineOutcome {
+                    is_error: true,
+                    error: Some(e.to_string()),
+                    ..Default::default()
+                },
+                activity_seen: false,
+                park: None,
+                priced: false,
+                usage_seen: false,
+                invoked: false,
+                ran_tools: false,
+                usage_before: None,
+                stream_usage: Usage::default(),
+                request_usage_seen: false,
+                budget_stop: None,
+                pricing,
+                cleaned_up: true,
+            });
+        }
+    };
+    let mut input = run.input.take();
+    let decisions = run.decisions.take();
+    let stop = run.stop.take();
+    let inbox_before = ctx.agent.inbox_cursor;
+    let mut activity_seen = false;
+    let mut steering = Steering::new(inbox_before);
+    // Delivered between context assembly and now: hand it over straight away.
+    steer(runtime, ctx, &mut steering, &mut input).await?;
+    // A question the engine is blocked on; the next message answers it.
+    let mut question: Option<String> = None;
+    let mut state = StreamState::new(pricing, resolved.clone());
+    runtime.bus.publish_delta(
+        ctx.agent.id,
+        state.message_invocation,
+        DeltaKind::TurnStarted { turn: ctx.turn },
+    );
+    // Tools the engine moved to the background: the turn is not over until
+    // they report back and the model has answered again.
+    let mut background: BTreeSet<String> = BTreeSet::new();
+    // The engine's result while it still owes an answer: to background work,
+    // or to a steered message it has not folded in yet.
+    let mut settled: Option<EngineOutcome> = None;
+    let mut settle_deadline: Option<tokio::time::Instant> = None;
+    // A harness action ended the turn; the engine is winding down and may
+    // not decide the agent's state again.
+    let mut park: Option<Park> = None;
+    let mut park_reply: Option<(String, serde_json::Value)> = None;
+    let mut native_wait: Option<super::native_wait::NativeWait> = None;
+    // The park's stop runs on its own timer (`Park::arm_stop`); this is only
+    // how the loop learns that it fired.
+    let (stop_fired_tx, mut stop_fired_rx) = mpsc::channel::<()>(1);
+    // Set once the process has been stopped: the turn ends when its stream
+    // closes, or when this expires.
+    let mut reap_grace: Option<ReapGrace> = None;
+    // Set exactly where the grant is found crossed; the caller turns it into
+    // the same stop the scheduler's sweep performs.
+    let mut budget_stop: Option<Crossed> = None;
+    let mut subtree = SubtreeUsage::default();
+    let mut outcome = loop {
+        if native_wait
+            .as_ref()
+            .is_some_and(|wait| wait.ready(runtime, ctx))
+            && let Some(wait) = native_wait.take()
+        {
+            wait.finish("a message arrived or the requested condition was satisfied");
+        }
+        let native_deadline = native_wait.as_ref().and_then(|wait| wait.deadline());
+        tokio::select! {
+            ready = async {
+                match input.as_ref() {
+                    Some(tx) => tx.reserve().await.is_ok(),
+                    None => false,
+                }
+            }, if steering.retry && input.is_some() && park.is_none() && question.is_none() => {
+                if ready {
+                    steer(runtime, ctx, &mut steering, &mut input).await?;
+                } else {
+                    input = None;
+                    steering.retry = false;
+                }
+            }
+            () = tokio::time::sleep_until(native_deadline.unwrap_or_else(tokio::time::Instant::now)), if native_deadline.is_some() => {
+                if let Some(wait) = native_wait.take() {
+                    wait.finish("the requested deadline was reached");
+                }
+            }
+            ev = run.events.recv() => {
+                activity_seen |= ev.as_ref().is_some_and(|event| event_has_activity(event, ctx));
+                match ev {
+                None => break settled.take().unwrap_or_else(|| EngineOutcome {
+                    is_error: true,
+                    error: Some(match reap_grace {
+                        Some(_) => "engine stopped after a harness tool ended the turn".into(),
+                        None => "engine stream ended unexpectedly".into(),
+                    }),
+                    ..Default::default()
+                }),
+                // Being reaped: keep its last word, but the turn is not over
+                // until the stream closes, which is when the process is gone.
+                Some(EngineEvent::Done(o)) if reap_grace.is_some() || stopping(&park) || cancel.is_cancelled() => {
+                    let exhaustion = settled
+                        .as_ref()
+                        .and_then(|held| held.error.clone())
+                        .filter(|error| names_exhaustion(error));
+                    settled = Some(match settled.take() {
+                        Some(mut held) => {
+                            let mut receipt = o;
+                            // A late receipt may improve accounting, but cannot
+                            // turn a cancellation or forced stop into success.
+                            receipt.is_error |= held.is_error;
+                            receipt.forced |= held.forced;
+                            receipt.interrupted |= held.interrupted;
+                            receipt.error = receipt.error.or(held.error.take());
+                            if receipt.usage.total_tokens() == 0 && held.usage.total_tokens() > 0 {
+                                held.is_error = receipt.is_error;
+                                held.forced = receipt.forced;
+                                held.interrupted = receipt.interrupted;
+                                held.error = receipt.error;
+                                held
+                            } else {
+                                receipt
+                            }
+                        }
+                        None => o,
+                    });
+                    // A synthetic cancellation during reap is not the cause
+                    // that made the provider stop answering.
+                    if let (Some(error), Some(outcome)) = (exhaustion, settled.as_mut()) {
+                        outcome.error = Some(error);
+                        outcome.is_error = true;
+                    }
+                    reap_grace.get_or_insert_with(ReapGrace::start);
+                }
+                Some(EngineEvent::Done(o)) => {
+                    // No native background/input acknowledgement can make an
+                    // exhausted provider answer. Do not strand the turn on it.
+                    if o.error.as_deref().is_some_and(names_exhaustion) {
+                        match park.as_mut() {
+                            Some(park) => park.stop_now(&engine_cancel),
+                            None => engine_cancel.cancel(),
+                        }
+                        drop(input.take());
+                        break o;
+                    }
+                    if effects.terminal() && !background.is_empty() {
+                        // A final receipt does not settle background work still
+                        // reported live. Keep it while the bounded park drains
+                        // or kills the process; its waiter remains fenced out.
+                        settled = Some(o);
+                        continue;
+                    }
+                    let owed = !background.is_empty() || !steering.outstanding.is_empty();
+                    if !owed || input.is_none() {
+                        // Close stdin first so the engine exits on its own.
+                        drop(input.take());
+                        break o;
+                    }
+                    settled = Some(o);
+                    settle_deadline = None;
+                }
+                Some(EngineEvent::BackgroundTask { id, running }) => {
+                    // Filled from the engine's own stdout, so bounded like
+                    // any other input it controls.
+                    let id = clamp(&id, MAX_ENGINE_NAME);
+                    if !running && background.contains(&id)
+                        && let Some(wait) = native_wait.take()
+                    {
+                        wait.finish(&format!("native background task {id} finished"));
+                    }
+                    if running {
+                        if background.len() < MAX_BACKGROUND_IDS {
+                            background.insert(id);
+                        } else {
+                            tracing::warn!(agent = %ctx.agent.id, %id, "engine reported more background tasks than the turn tracks; not waiting on this one");
+                        }
+                    } else if background.remove(&id) && background.is_empty() {
+                        // The last result a parked turn was waiting for is
+                        // in. Whatever the engine learns from it may no
+                        // longer decide anything, so the turn stops paying
+                        // for the model loop that would read it.
+                        if let Some(park) = park.as_mut()
+                            && !park.killed()
+                        {
+                            park.stop_now(&engine_cancel);
+                            reap_grace = Some(ReapGrace::start());
+                        }
+                    }
+                }
+                Some(EngineEvent::InputAccepted) => {
+                    if let Some(pending) = steering.outstanding.pop_front() {
+                        record_consumed(runtime, ctx, pending)?;
+                    }
+                    // The engine is answering it; its next result decides.
+                    settled = None;
+                    settle_deadline = None;
+                }
+                Some(EngineEvent::InputRejected { reason }) => {
+                    tracing::warn!(agent = %ctx.agent.id, %reason, "engine refused a steered message; it waits for the next turn");
+                    steering.rewind(ctx.agent.inbox_cursor);
+                    // Nothing else owed: the result already in hand is final.
+                    if background.is_empty()
+                        && let Some(o) = settled.take()
+                    {
+                        drop(input.take());
+                        break o;
+                    }
+                }
+                Some(EngineEvent::Permission { request_id, tool, input: tool_input, side_effect }) => {
+                    // Once the turn's end is committed nothing more may run in
+                    // it, so a prompt is denied outright: no operator is asked,
+                    // and the wind-down is never suspended on an answer.
+                    let verdict = match park.as_mut() {
+                        Some(park) => {
+                            park.refused(&tool);
+                            Verdict { allow: false, message: Some(TURN_IS_OVER.to_owned()) }
+                        }
+                        None => {
+                            let class = side_effect.unwrap_or_else(|| side_effect_of(&tool));
+                            permission_verdict(
+                                runtime,
+                                ctx,
+                                GateSubject::from_prompt(runtime, ctx, &tool, &tool_input, class),
+                                cancel,
+                                true,
+                            )
+                            .await?
+                        }
+                    };
+                    if let Some(tx) = decisions.as_ref() {
+                        let _ = tx.send(PermissionDecision {
+                            request_id,
+                            allow: verdict.allow,
+                            message: verdict.message,
+                            answer: None,
+                        }).await;
+                    }
+                }
+                Some(EngineEvent::Question { request_id, prompt }) => {
+                    // Shown as the agent asking; the person's reply is routed back below.
+                    runtime.apply(Commit::new().event(ctx.draft(EventKind::AgentMessage {
+                        role: MessageRole::Assistant,
+                        content: vec![ContentBlock::Text { text: prompt }],
+                        invocation: None,
+                    })))?;
+                    match steering.pending(runtime, ctx)? {
+                        // Already answered while the question was being asked.
+                        Some(pending) => answer_question(runtime, ctx, decisions.as_ref(), request_id, pending, &mut steering, &engine_cancel).await?,
+                        None => question = Some(request_id),
+                    }
+                }
+                Some(EngineEvent::Session { id, model, tools }) => {
+                    // Verified at runtime, not just at argv: a renamed or
+                    // rejected `--disallowedTools` is a silent bypass otherwise - the runtime would never see a
+                    // spawn the CLI ran natively.
+                    if let Some(bypassed) = disallowed_native_spawn_tool(engine.kind(), &tools) {
+                        runtime.apply(Commit::new().event(ctx.draft(EventKind::Custom {
+                            name: "engine.kill_switch_bypassed".into(),
+                            payload: json!({ "engine": engine.kind().as_str(), "tool": bypassed }),
+                        })))?;
+                        // Stop the process itself, the same path a cancel
+                        // uses - closing stdin only asks it to exit, and it
+                        // may already be running native subagents the
+                        // harness cannot see.
+                        // Through the park when the turn has one, or its
+                        // wind-down would record this runtime kill as the
+                        // engine having stopped itself.
+                        match park.as_mut() {
+                            Some(park) => park.stop_now(&engine_cancel),
+                            None => engine_cancel.cancel(),
+                        }
+                        break EngineOutcome {
+                            interrupted: true,
+                            is_error: true,
+                            error: Some(format!(
+                                "the engine still advertises its native spawn tool \
+                                 {bypassed:?} despite the kill-switch flag; refusing to run it \
+                                 blind to the harness"
+                            )),
+                            ..Default::default()
+                        };
+                    }
+                    handle_event(
+                        runtime,
+                        ctx,
+                        snapshot,
+                        EngineEvent::Session { id, model, tools },
+                        &mut state,
+                    )?
+                }
+                Some(ev) => {
+                    let reply_received = matches!(&ev, EngineEvent::ToolResult { tool_use_id, .. }
+                        if park_reply.as_ref().is_some_and(|(name, input)| state.is_bridge_reply(tool_use_id, name, input)));
+                    // Under bypassed approvals the engine's own tools never
+                    // reach the bridge, so an accounting is the only moment a
+                    // native turn's crossing becomes known. Any
+                    // event that moved the figure counts, not one variant: a
+                    // third-party engine may hang its usage on its messages.
+                    let before = ctx.agent.stats.usage;
+                    let commits_before = runtime.store.commits();
+                    handle_event(runtime, ctx, snapshot, ev, &mut state)?;
+                    if reply_received {
+                        park_reply = None;
+                        super::parking::ask_to_stop(&mut input, stop.as_ref(), runtime.config.engine_park_grace);
+                    }
+                    subtree.note_own_commits(
+                        runtime.store.commits().saturating_sub(commits_before),
+                    );
+                    if budget_stop.is_none()
+                        && ctx.agent.stats.usage != before
+                        && let Some(crossed) = budget_crossed(runtime, ctx, &mut subtree)?
+                    {
+                        // Ends here, without the wind-down the bridge path
+                        // gets: the accounting that crossed the grant is the
+                        // figure, so there is nothing left to reap - and
+                        // anything the engine said next would be work the
+                        // agent was no longer granted.
+                        // Through the park when the turn has one (see :738-741) -
+                        // else `stopped_by` would blame the engine for this stop.
+                        match park.as_mut() {
+                            Some(park) => park.stop_now(&engine_cancel),
+                            None => engine_cancel.cancel(),
+                        }
+                        let outcome = budget_outcome(&crossed.reason, settled.take());
+                        budget_stop = Some(crossed);
+                        break outcome;
+                    }
+                }
+                }
+            },
+            // The park's own timer stopped the process. From here the turn
+            // only reaps what the engine measured before it went.
+            Some(()) = stop_fired_rx.recv(), if reap_grace.is_none() => {
+                reap_grace = Some(ReapGrace::start());
+            }
+            // The stopped process did not report in. Its result is a floor,
+            // not a sum, and the next turn may resume the session anyway.
+            () = async {
+                match reap_grace.as_mut() {
+                    Some(grace) => grace.spent().await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                tracing::warn!(agent = %ctx.agent.id, "stopped engine did not exit within the reap grace");
+                break settled.take().unwrap_or_default();
+            }
+            // What the engine owed was not answered in time.
+            () = tokio::time::sleep_until(settle_deadline.unwrap_or_else(tokio::time::Instant::now)), if settle_deadline.is_some() => {
+                drop(input.take());
+                if let Some(o) = settled.take() {
+                    break o;
+                }
+            }
+            req = req_rx.recv() => {
+                if let Some(req) = req {
+                    activity_seen = true;
+                    if native_wait.is_some() && req.name == "wait_for" {
+                        let _ = req.reply.send(("A native background wait is already pending in this session.".into(), true));
+                        continue;
+                    }
+                    let name = req.name.clone();
+                    // The grant is checked before the engine acts, not after
+                    // the turn: discovering the overrun at the end is one
+                    // published comment too late.
+                    let known = budget_stop.is_some();
+                    if !known
+                        && let Some(crossed) = budget_crossed(runtime, ctx, &mut subtree)?
+                    {
+                        budget_stop = Some(crossed);
+                    }
+                    if let Some(reason) = budget_stop.as_ref().map(|c| c.reason.clone()) {
+                        // Read before the reply consumes the request: a
+                        // permission prompt is named `permission` but gates
+                        // some other tool, whose name is in the payload.
+                        let gated = gated_call(&req);
+                        let _ = req.reply.send(refusal(&req.name, &reason));
+                        record_refused_call(runtime, ctx, &gated, &reason, &mut state)?;
+                        // Stop the process too: refusing bridge calls alone
+                        // leaves its own tools running past the grant. Through
+                        // the park, so the engine is asked in its own verb and
+                        // the reap keeps its final usage. The grace is the
+                        // window the refusal needs to reach the engine through
+                        // the bridge child, which the stop takes with it.
+                        if !known
+                            && stop_for_crossing(
+                                &mut park,
+                                ctx.agent.id,
+                                REFUSAL_GRACE,
+                                &background,
+                                &mut input,
+                                stop.as_ref(),
+                                &engine_cancel,
+                                stop_fired_tx.clone(),
+                            )
+                        {
+                            reap_grace = Some(ReapGrace::start());
+                        }
+                    } else if stopping(&park) {
+                        // The process is being killed. Nothing served now can
+                        // reach it, and a mutation would commit for a turn
+                        // whose engine is already gone.
+                        let _ = req.reply.send((TURN_IS_OVER.to_owned(), true));
+                        if let Some(park) = park.as_mut() {
+                            park.refused(&name);
+                        }
+                    } else {
+                        let reply = (engine.kind() == super::EngineKind::CLAUDE_CODE && stop.is_some())
+                            .then(|| (req.name.clone(), req.input.clone()));
+                        let served =
+                            handle_request(runtime, ctx, tool_ctx, req, effects, cancel, park.is_some(), !background.is_empty())
+                                .await?;
+                        if let Served::NativeWait(wait) = served {
+                            native_wait = Some(wait);
+                            continue;
+                        }
+                        if let Some(park) = park.as_mut() {
+                            if matches!(served, Served::Refused) {
+                                park.refused(&name);
+                            }
+                        } else if effects.parked() {
+                            // Let Claude acknowledge the MCP reply before interrupting;
+                            // otherwise it substitutes a spurious user-rejection result.
+                            park_reply = reply.filter(|_| !effects.terminal());
+                            let started = start_park(
+                                ctx.agent.id,
+                                park_grace(
+                                    &effects.next,
+                                    !background.is_empty(),
+                                    runtime.config.engine_park_grace,
+                                ),
+                                &background,
+                                &mut input,
+                                // Preserve the native final response and usage
+                                // receipt after terminal task tools. The bounded
+                                // park timer still stops an unresponsive engine.
+                                stop.as_ref().filter(|_| !effects.terminal()),
+                                &engine_cancel,
+                                stop_fired_tx.clone(),
+                                park_reply.is_some(),
+                            );
+                            if started.killed() {
+                                reap_grace = Some(ReapGrace::start());
+                            }
+                            park = Some(started);
+                        }
+                    }
+                }
+            }
+            // Nothing a person sends can reach a turn that is over: an answer
+            // handed to a process about to be killed would be consumed and
+            // lost, so it stays in the inbox for the next turn.
+            msg = bus.recv(), if park.is_none() && (input.is_some() || question.is_some()) => {
+                let delivered = match msg {
+                    Ok(BusMessage::Event(ev)) => {
+                        ev.agent_id == Some(ctx.agent.id)
+                            && matches!(ev.kind, EventKind::InboxDelivered { .. })
+                    }
+                    // Fell behind the bus; the store still has what arrived.
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => true,
+                    _ => false,
+                };
+                if delivered {
+                    match question.take() {
+                        Some(request_id) => match steering.pending(runtime, ctx)? {
+                            Some(pending) => answer_question(runtime, ctx, decisions.as_ref(), request_id, pending, &mut steering, &engine_cancel).await?,
+                            None => question = Some(request_id),
+                        },
+                        // Steering: what arrived goes to the engine at its next
+                        // step instead of waiting for this turn to end.
+                        None => steer(runtime, ctx, &mut steering, &mut input).await?,
+                    }
+                }
+            }
+        }
+        // Background work has no deadline. Once it is done, or while a steered
+        // message awaits its acknowledgement, the engine gets bounded time to
+        // answer; then the turn ends and unacknowledged messages stay queued.
+        if settled.is_some()
+            && background.is_empty()
+            && settle_deadline.is_none()
+            && reap_grace.is_none()
+        {
+            let grace = if steering.outstanding.is_empty() {
+                BACKGROUND_GRACE
+            } else {
+                STEER_GRACE
+            };
+            settle_deadline = Some(tokio::time::Instant::now() + grace);
+        }
+    };
+    let class = crate::exhaustion::engine_error_class(outcome.error.as_deref().unwrap_or(""));
+    let mut cleaned_up = false;
+    if outcome.is_error
+        && crate::exhaustion::native_transient(class)
+        && park.is_none()
+        && budget_stop.is_none()
+        && !outcome.interrupted
+        && !cancel.is_cancelled()
+    {
+        // Done precedes native process cleanup; replay must wait for stream closure.
+        drop(input.take());
+        engine_cancel.cancel();
+        let mut cleanup_grace = ReapGrace::start();
+        loop {
+            tokio::select! {
+                () = cancel.cancelled() => {
+                    activity_seen = true;
+                    break;
+                }
+                () = cleanup_grace.spent() => {
+                    activity_seen = true;
+                    tracing::warn!(agent = %ctx.agent.id, "failed engine did not close its stream; not retrying it");
+                    break;
+                }
+                request = req_rx.recv() => if let Some(request) = request {
+                    activity_seen = true;
+                    let _ = request.reply.send((TURN_IS_OVER.to_owned(), true));
+                },
+                event = run.events.recv() => match event {
+                    None => {
+                        cleaned_up = true;
+                        break;
+                    }
+                    Some(EngineEvent::Done(receipt)) => {
+                        activity_seen = true;
+                        raise_to(&mut outcome.usage, receipt.usage);
+                        outcome.usage.cost_usd = outcome.usage.cost_usd.max(receipt.usage.cost_usd);
+                        outcome.usage.cost_complete &= receipt.usage.cost_complete;
+                        outcome.usage.estimated_cost_usd = match (outcome.usage.estimated_cost_usd, receipt.usage.estimated_cost_usd) {
+                            (Some(before), Some(after)) => Some(before.max(after)),
+                            (before, after) => before.or(after),
+                        };
+                        outcome.cost_usd = match (outcome.cost_usd, receipt.cost_usd) {
+                            (Some(before), Some(after)) => Some(before.max(after)),
+                            (before, after) => before.or(after),
+                        };
+                        let receipt_class = crate::exhaustion::engine_error_class(
+                            receipt.error.as_deref().unwrap_or(""),
+                        );
+                        if crate::exhaustion::recoverable_by_fallback(receipt_class) {
+                            outcome.error = receipt.error;
+                        }
+                        if receipt.text.as_deref().is_some_and(|text| !text.is_empty()) {
+                            outcome.text = receipt.text;
+                        }
+                        outcome.forced |= receipt.forced;
+                    }
+                    Some(event) => {
+                        activity_seen |= event_has_activity(&event, ctx);
+                        let usage_before = ctx.agent.stats.usage;
+                        handle_event(runtime, ctx, snapshot, event, &mut state)?;
+                        if ctx.agent.stats.usage != usage_before
+                            && budget_stop.is_none()
+                            && let Some(crossed) = budget_crossed(runtime, ctx, &mut subtree)?
+                        {
+                            budget_stop = Some(crossed);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // The turn is over: a timer still counting down would stop a process
+    // that is no longer this turn's, and would misreport who stopped it.
+    if let Some(park) = park.as_mut() {
+        park.disarm();
+    }
+    // Under the id of a message left uncommitted, if any: its streamed text
+    // stays live until the interrupt or failure that ends the turn keeps it.
+    runtime.bus.publish_delta(
+        ctx.agent.id,
+        state.message_invocation,
+        DeltaKind::TurnFinished,
+    );
+    Ok(DriveResult {
+        outcome,
+        activity_seen: activity_seen || steering.sent_up_to > inbox_before,
+        park,
+        priced: state.priced,
+        usage_seen: state.usage_seen,
+        invoked: state.invoked,
+        ran_tools: state.ran_tools,
+        usage_before: state.usage_before,
+        stream_usage: state.stream_usage,
+        request_usage_seen: state.request_usage_seen,
+        budget_stop,
+        pricing: state.pricing,
+        cleaned_up,
+    })
+}

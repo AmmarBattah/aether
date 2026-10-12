@@ -1,0 +1,20 @@
+── unicode 80 compact
+
+── unicode 80 detail
+• Thought for 12s
+  The writer holds the lock across fsync, so every reader stalls behind it.
+── unicode 120 compact
+
+── unicode 120 detail
+• Thought for 12s
+  The writer holds the lock across fsync, so every reader stalls behind it.
+── ascii 80 compact
+
+── ascii 80 detail
+* Thought for 12s
+  The writer holds the lock across fsync, so every reader stalls behind it.
+── ascii 120 compact
+
+── ascii 120 detail
+* Thought for 12s
+  The writer holds the lock across fsync, so every reader stalls behind it.

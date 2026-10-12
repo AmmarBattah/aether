@@ -1,0 +1,24 @@
+── unicode 80 compact
+• Exploring
+  └ Read README.md
+── unicode 80 detail
+• Exploring
+  └ Read README.md
+── unicode 120 compact
+• Exploring
+  └ Read README.md
+── unicode 120 detail
+• Exploring
+  └ Read README.md
+── ascii 80 compact
+* Exploring
+  \ Read README.md
+── ascii 80 detail
+* Exploring
+  \ Read README.md
+── ascii 120 compact
+* Exploring
+  \ Read README.md
+── ascii 120 detail
+* Exploring
+  \ Read README.md

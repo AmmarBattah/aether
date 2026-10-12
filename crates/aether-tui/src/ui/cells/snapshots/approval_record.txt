@@ -1,0 +1,16 @@
+── unicode 80 compact
+✓ You approved bash `cargo test` · saved for aether
+── unicode 80 detail
+✓ You approved bash `cargo test` · saved for aether
+── unicode 120 compact
+✓ You approved bash `cargo test` · saved for aether
+── unicode 120 detail
+✓ You approved bash `cargo test` · saved for aether
+── ascii 80 compact
++ You approved bash `cargo test` | saved for aether
+── ascii 80 detail
++ You approved bash `cargo test` | saved for aether
+── ascii 120 compact
++ You approved bash `cargo test` | saved for aether
+── ascii 120 detail
++ You approved bash `cargo test` | saved for aether

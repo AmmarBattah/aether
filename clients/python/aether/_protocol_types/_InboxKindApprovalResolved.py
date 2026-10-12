@@ -1,0 +1,13 @@
+# Generated from clients/protocol.schema.json by scripts/generate_clients.py.
+# Do not edit: change the Rust types and regenerate.
+from __future__ import annotations
+
+from typing import Any, Literal, TypedDict
+from .. import protocol as _protocol
+
+
+class InboxKindApprovalResolved(TypedDict, total=False):
+    approval: _protocol.ApprovalId
+    decision: _protocol.ApprovalDecision
+    kind: Literal["approval_resolved"]
+    note: str | None  # optional

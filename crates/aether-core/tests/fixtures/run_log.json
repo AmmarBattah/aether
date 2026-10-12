@@ -1,0 +1,533 @@
+[
+  {
+    "id": "evt_01M1ZADZBN9B715Q3D13ZSXFV5",
+    "seq": 1,
+    "at": "2026-02-01T10:00:01Z",
+    "actor": {
+      "actor": "system"
+    },
+    "agent_id": "agt_01M1ZAW42J80EEMWTA0R66CMJ2",
+    "run": "run_01M1ZA1VZHX7VXSKQ9NZKNHBF1",
+    "kind": {
+      "type": "agent.created",
+      "role": "assistant",
+      "name": "root",
+      "model": {
+        "provider": "mock",
+        "model": "mock-1"
+      },
+      "scope": {}
+    }
+  },
+  {
+    "id": "evt_01M1ZA88EPM4TJ006ECWJARRY6",
+    "seq": 2,
+    "at": "2026-02-01T10:00:02Z",
+    "actor": {
+      "actor": "system"
+    },
+    "task_id": "tsk_01M1ZAJP8MYJMGAE0CPAC826R4",
+    "run": "run_01M1ZA1VZHX7VXSKQ9NZKNHBF1",
+    "kind": {
+      "type": "task.created",
+      "objective": "summarize the repository",
+      "dependencies": [],
+      "priority": "normal"
+    }
+  },
+  {
+    "id": "evt_01M1ZA3HHQZXD3V99FQN5VK117",
+    "seq": 3,
+    "at": "2026-02-01T10:00:03Z",
+    "actor": {
+      "actor": "system"
+    },
+    "task_id": "tsk_01M1ZAJP8MYJMGAE0CPAC826R4",
+    "run": "run_01M1ZA1VZHX7VXSKQ9NZKNHBF1",
+    "kind": {
+      "type": "task.assigned",
+      "owner": "agt_01M1ZAW42J80EEMWTA0R66CMJ2"
+    }
+  },
+  {
+    "id": "evt_01M1ZAYTMRAP0MPJCG2ERCEA48",
+    "seq": 4,
+    "at": "2026-02-01T10:00:04Z",
+    "actor": {
+      "actor": "scheduler"
+    },
+    "agent_id": "agt_01M1ZAW42J80EEMWTA0R66CMJ2",
+    "run": "run_01M1ZA1VZHX7VXSKQ9NZKNHBF1",
+    "kind": {
+      "type": "agent.started",
+      "turn": 1
+    }
+  },
+  {
+    "id": "evt_01M1ZAS3QSNFK5HVFHD7BX9K79",
+    "seq": 5,
+    "at": "2026-02-01T10:00:05Z",
+    "actor": {
+      "actor": "system"
+    },
+    "agent_id": "agt_01M1ZAW42J80EEMWTA0R66CMJ2",
+    "run": "run_01M1ZA1VZHX7VXSKQ9NZKNHBF1",
+    "kind": {
+      "type": "snapshot.created",
+      "snapshot": "snp_01M1ZAAY0WPTCR2PRMEJ4GTEGC",
+      "turn": 1,
+      "model": {
+        "provider": "mock",
+        "model": "mock-1"
+      },
+      "token_estimate": 900,
+      "layers": []
+    }
+  },
+  {
+    "id": "evt_01M1ZAMCTT086PC4JJR0YE4WAA",
+    "seq": 6,
+    "at": "2026-02-01T10:00:06Z",
+    "actor": {
+      "actor": "agent",
+      "id": "agt_01M1ZAW42J80EEMWTA0R66CMJ2"
+    },
+    "agent_id": "agt_01M1ZAW42J80EEMWTA0R66CMJ2",
+    "run": "run_01M1ZA1VZHX7VXSKQ9NZKNHBF1",
+    "kind": {
+      "type": "tool.requested",
+      "call": {
+        "id": "call_01M1ZA88EPM4TJ006ECWJARRY6",
+        "provider_call_id": "toolu_1",
+        "name": "bash",
+        "input": {
+          "command": "ls"
+        },
+        "agent_id": "agt_01M1ZAW42J80EEMWTA0R66CMJ2",
+        "resources": [],
+        "requested_at": "2026-02-01T10:00:06Z"
+      },
+      "side_effect": "mutation"
+    }
+  },
+  {
+    "id": "evt_01M1ZAFNXVB1S77DNK3SHZZ5DB",
+    "seq": 7,
+    "at": "2026-02-01T10:00:07Z",
+    "actor": {
+      "actor": "agent",
+      "id": "agt_01M1ZAW42J80EEMWTA0R66CMJ2"
+    },
+    "agent_id": "agt_01M1ZAW42J80EEMWTA0R66CMJ2",
+    "run": "run_01M1ZA1VZHX7VXSKQ9NZKNHBF1",
+    "kind": {
+      "type": "approval.requested",
+      "approval": "apr_01M1ZA3HHQZXD3V99FQN5VK117",
+      "call": "call_01M1ZA88EPM4TJ006ECWJARRY6",
+      "tool": "bash",
+      "description": "ls",
+      "side_effect": "mutation"
+    }
+  },
+  {
+    "id": "evt_01M1ZAAY0WPTCR2PRMEJ4GTEGC",
+    "seq": 8,
+    "at": "2026-02-01T10:00:08Z",
+    "actor": {
+      "actor": "user"
+    },
+    "agent_id": "agt_01M1ZAW42J80EEMWTA0R66CMJ2",
+    "run": "run_01M1ZA1VZHX7VXSKQ9NZKNHBF1",
+    "kind": {
+      "type": "approval.resolved",
+      "approval": "apr_01M1ZA3HHQZXD3V99FQN5VK117",
+      "decision": "approved",
+      "by": {
+        "actor": "user"
+      }
+    }
+  },
+  {
+    "id": "evt_01M1ZA573X1KZ9XZVNSBQ1NQKD",
+    "seq": 9,
+    "at": "2026-02-01T10:00:09Z",
+    "actor": {
+      "actor": "agent",
+      "id": "agt_01M1ZAW42J80EEMWTA0R66CMJ2"
+    },
+    "agent_id": "agt_01M1ZAW42J80EEMWTA0R66CMJ2",
+    "run": "run_01M1ZA1VZHX7VXSKQ9NZKNHBF1",
+    "kind": {
+      "type": "tool.started",
+      "call": "call_01M1ZA88EPM4TJ006ECWJARRY6"
+    }
+  },
+  {
+    "id": "evt_01M1ZA0G6YCCJTR8YP44AJG0PE",
+    "seq": 10,
+    "at": "2026-02-01T10:00:10Z",
+    "actor": {
+      "actor": "agent",
+      "id": "agt_01M1ZAW42J80EEMWTA0R66CMJ2"
+    },
+    "agent_id": "agt_01M1ZAW42J80EEMWTA0R66CMJ2",
+    "run": "run_01M1ZA1VZHX7VXSKQ9NZKNHBF1",
+    "kind": {
+      "type": "artifact.created",
+      "artifact": {
+        "id": "art_01M1ZAYTMRAP0MPJCG2ERCEA48",
+        "kind": {
+          "kind": "command_output"
+        },
+        "name": "ls output",
+        "summary": "12 entries",
+        "size_bytes": 480,
+        "created_by": {
+          "actor": "tool",
+          "call": "call_01M1ZA88EPM4TJ006ECWJARRY6"
+        },
+        "agent_id": "agt_01M1ZAW42J80EEMWTA0R66CMJ2",
+        "task_id": "tsk_01M1ZAJP8MYJMGAE0CPAC826R4",
+        "created_at": "2026-02-01T10:00:10Z"
+      }
+    }
+  },
+  {
+    "id": "evt_01M1ZAVS9ZQ55BKH1QFXX3B9SF",
+    "seq": 11,
+    "at": "2026-02-01T10:00:11Z",
+    "actor": {
+      "actor": "agent",
+      "id": "agt_01M1ZAW42J80EEMWTA0R66CMJ2"
+    },
+    "agent_id": "agt_01M1ZAW42J80EEMWTA0R66CMJ2",
+    "run": "run_01M1ZA1VZHX7VXSKQ9NZKNHBF1",
+    "kind": {
+      "type": "tool.succeeded",
+      "call": "call_01M1ZA88EPM4TJ006ECWJARRY6",
+      "outcome": {
+        "content": "12 entries",
+        "is_error": false,
+        "artifacts": [
+          "art_01M1ZAYTMRAP0MPJCG2ERCEA48"
+        ],
+        "duration_ms": 35,
+        "truncated": false
+      }
+    }
+  },
+  {
+    "id": "evt_01M1ZAP2C02YRWET4RTPGM6JWG",
+    "seq": 12,
+    "at": "2026-02-01T10:00:12Z",
+    "actor": {
+      "actor": "system"
+    },
+    "agent_id": "agt_01M1ZAW42J80EEMWTA0R66CMJ2",
+    "run": "run_01M1ZA1VZHX7VXSKQ9NZKNHBF1",
+    "kind": {
+      "type": "invocation.completed",
+      "invocation": "inv_01M1ZAS3QSNFK5HVFHD7BX9K79",
+      "snapshot": "snp_01M1ZAAY0WPTCR2PRMEJ4GTEGC",
+      "model": {
+        "provider": "mock",
+        "model": "mock-1"
+      },
+      "usage": {
+        "input_tokens": 900,
+        "output_tokens": 40,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cost_usd": 0.012
+      },
+      "stop_reason": {
+        "reason": "tool_use"
+      },
+      "duration_ms": 1400
+    }
+  },
+  {
+    "id": "evt_01M1ZAHBF1DQBD937S5F351VZH",
+    "seq": 13,
+    "at": "2026-02-01T10:00:13Z",
+    "actor": {
+      "actor": "system"
+    },
+    "agent_id": "agt_01M1ZAQD5KKS1ZF5XBBHSQ7XN3",
+    "parent_agent_id": "agt_01M1ZAW42J80EEMWTA0R66CMJ2",
+    "run": "run_01M1ZA1VZHX7VXSKQ9NZKNHBF1",
+    "kind": {
+      "type": "agent.created",
+      "role": "worker",
+      "name": "reader",
+      "parent": "agt_01M1ZAW42J80EEMWTA0R66CMJ2",
+      "model": {
+        "provider": "mock",
+        "model": "mock-1"
+      },
+      "scope": {}
+    }
+  },
+  {
+    "id": "evt_01M1ZACMJ2RGYY4CATG8PPW42J",
+    "seq": 14,
+    "at": "2026-02-01T10:00:14Z",
+    "actor": {
+      "actor": "system"
+    },
+    "task_id": "tsk_01M1ZADZBN9B715Q3D13ZSXFV5",
+    "run": "run_01M1ZA1VZHX7VXSKQ9NZKNHBF1",
+    "kind": {
+      "type": "task.created",
+      "objective": "read the manifest",
+      "parent_task": "tsk_01M1ZAJP8MYJMGAE0CPAC826R4",
+      "dependencies": [
+        "tsk_01M1ZAJP8MYJMGAE0CPAC826R4"
+      ],
+      "priority": "high"
+    }
+  },
+  {
+    "id": "evt_01M1ZA7XN339HFZNDVV197QD5K",
+    "seq": 15,
+    "at": "2026-02-01T10:00:15Z",
+    "actor": {
+      "actor": "system"
+    },
+    "task_id": "tsk_01M1ZADZBN9B715Q3D13ZSXFV5",
+    "run": "run_01M1ZA1VZHX7VXSKQ9NZKNHBF1",
+    "kind": {
+      "type": "task.assigned",
+      "owner": "agt_01M1ZAQD5KKS1ZF5XBBHSQ7XN3"
+    }
+  },
+  {
+    "id": "evt_01M1ZA26R4E240TYGW6TWRJP8M",
+    "seq": 16,
+    "at": "2026-02-01T10:00:16Z",
+    "actor": {
+      "actor": "scheduler"
+    },
+    "agent_id": "agt_01M1ZAQD5KKS1ZF5XBBHSQ7XN3",
+    "parent_agent_id": "agt_01M1ZAW42J80EEMWTA0R66CMJ2",
+    "run": "run_01M1ZA1VZHX7VXSKQ9NZKNHBF1",
+    "kind": {
+      "type": "agent.started",
+      "turn": 1
+    }
+  },
+  {
+    "id": "evt_01M1ZAXFV5SVQHN7KXHKF9DZBN",
+    "seq": 17,
+    "at": "2026-02-01T10:00:17Z",
+    "actor": {
+      "actor": "system"
+    },
+    "agent_id": "agt_01M1ZAQD5KKS1ZF5XBBHSQ7XN3",
+    "parent_agent_id": "agt_01M1ZAW42J80EEMWTA0R66CMJ2",
+    "run": "run_01M1ZA1VZHX7VXSKQ9NZKNHBF1",
+    "kind": {
+      "type": "snapshot.created",
+      "snapshot": "snp_01M1ZA573X1KZ9XZVNSBQ1NQKD",
+      "turn": 1,
+      "model": {
+        "provider": "mock",
+        "model": "mock-1"
+      },
+      "token_estimate": 400,
+      "layers": []
+    }
+  },
+  {
+    "id": "evt_01M1ZARRY64MA2GGPYWC2T88EP",
+    "seq": 18,
+    "at": "2026-02-01T10:00:18Z",
+    "actor": {
+      "actor": "agent",
+      "id": "agt_01M1ZAQD5KKS1ZF5XBBHSQ7XN3"
+    },
+    "agent_id": "agt_01M1ZAQD5KKS1ZF5XBBHSQ7XN3",
+    "parent_agent_id": "agt_01M1ZAW42J80EEMWTA0R66CMJ2",
+    "run": "run_01M1ZA1VZHX7VXSKQ9NZKNHBF1",
+    "kind": {
+      "type": "tool.requested",
+      "call": {
+        "id": "call_01M1ZA26R4E240TYGW6TWRJP8M",
+        "provider_call_id": "toolu_2",
+        "name": "read_file",
+        "input": {
+          "path": "Cargo.toml"
+        },
+        "agent_id": "agt_01M1ZAQD5KKS1ZF5XBBHSQ7XN3",
+        "resources": [],
+        "requested_at": "2026-02-01T10:00:16Z"
+      },
+      "side_effect": "read_only"
+    }
+  },
+  {
+    "id": "evt_01M1ZAK117FDXKBSSZ75NB3HHQ",
+    "seq": 19,
+    "at": "2026-02-01T10:00:19Z",
+    "actor": {
+      "actor": "agent",
+      "id": "agt_01M1ZAQD5KKS1ZF5XBBHSQ7XN3"
+    },
+    "agent_id": "agt_01M1ZAQD5KKS1ZF5XBBHSQ7XN3",
+    "parent_agent_id": "agt_01M1ZAW42J80EEMWTA0R66CMJ2",
+    "run": "run_01M1ZA1VZHX7VXSKQ9NZKNHBF1",
+    "kind": {
+      "type": "tool.failed",
+      "call": "call_01M1ZA26R4E240TYGW6TWRJP8M",
+      "error": "no such file",
+      "retryable": false
+    }
+  },
+  {
+    "id": "evt_01M1ZAEA48T6G462W0JY8WYTMR",
+    "seq": 20,
+    "at": "2026-02-01T10:00:20Z",
+    "actor": {
+      "actor": "system"
+    },
+    "agent_id": "agt_01M1ZAQD5KKS1ZF5XBBHSQ7XN3",
+    "parent_agent_id": "agt_01M1ZAW42J80EEMWTA0R66CMJ2",
+    "run": "run_01M1ZA1VZHX7VXSKQ9NZKNHBF1",
+    "kind": {
+      "type": "invocation.completed",
+      "invocation": "inv_01M1ZAMCTT086PC4JJR0YE4WAA",
+      "snapshot": "snp_01M1ZA573X1KZ9XZVNSBQ1NQKD",
+      "model": {
+        "provider": "mock",
+        "model": "mock-1"
+      },
+      "usage": {
+        "input_tokens": 400,
+        "output_tokens": 20,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cost_usd": 0.004
+      },
+      "stop_reason": {
+        "reason": "end_turn"
+      },
+      "duration_ms": 700
+    }
+  },
+  {
+    "id": "evt_01M1ZA9K795Z3N1BZ1XQVDS3QS",
+    "seq": 21,
+    "at": "2026-02-01T10:00:21Z",
+    "actor": {
+      "actor": "system"
+    },
+    "task_id": "tsk_01M1ZADZBN9B715Q3D13ZSXFV5",
+    "run": "run_01M1ZA1VZHX7VXSKQ9NZKNHBF1",
+    "kind": {
+      "type": "task.completed",
+      "result": {
+        "summary": "manifest missing; reported",
+        "artifacts": []
+      }
+    }
+  },
+  {
+    "id": "evt_01M1ZA4WAAGRP6WM228GEYMCTT",
+    "seq": 22,
+    "at": "2026-02-01T10:00:22Z",
+    "actor": {
+      "actor": "system"
+    },
+    "agent_id": "agt_01M1ZAQD5KKS1ZF5XBBHSQ7XN3",
+    "parent_agent_id": "agt_01M1ZAW42J80EEMWTA0R66CMJ2",
+    "run": "run_01M1ZA1VZHX7VXSKQ9NZKNHBF1",
+    "kind": {
+      "type": "agent.completed",
+      "summary": "reported the missing manifest"
+    }
+  },
+  {
+    "id": "evt_01M1ZAZ5DBVH9QQX53K91FFNXV",
+    "seq": 23,
+    "at": "2026-02-01T10:00:23Z",
+    "actor": {
+      "actor": "system"
+    },
+    "agent_id": "agt_01M1ZAW42J80EEMWTA0R66CMJ2",
+    "run": "run_01M1ZA1VZHX7VXSKQ9NZKNHBF1",
+    "kind": {
+      "type": "snapshot.created",
+      "snapshot": "snp_01M1ZA0G6YCCJTR8YP44AJG0PE",
+      "turn": 2,
+      "model": {
+        "provider": "mock",
+        "model": "mock-1"
+      },
+      "token_estimate": 1200,
+      "layers": []
+    }
+  },
+  {
+    "id": "evt_01M1ZATEGC6AW8J684Y2M0AY0W",
+    "seq": 24,
+    "at": "2026-02-01T10:00:24Z",
+    "actor": {
+      "actor": "system"
+    },
+    "agent_id": "agt_01M1ZAW42J80EEMWTA0R66CMJ2",
+    "run": "run_01M1ZA1VZHX7VXSKQ9NZKNHBF1",
+    "kind": {
+      "type": "invocation.completed",
+      "invocation": "inv_01M1ZAFNXVB1S77DNK3SHZZ5DB",
+      "snapshot": "snp_01M1ZA0G6YCCJTR8YP44AJG0PE",
+      "model": {
+        "provider": "mock",
+        "model": "mock-1"
+      },
+      "usage": {
+        "input_tokens": 1200,
+        "output_tokens": 60,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cost_usd": 0.02
+      },
+      "stop_reason": {
+        "reason": "end_turn"
+      },
+      "duration_ms": 1100
+    }
+  },
+  {
+    "id": "evt_01M1ZANQKDH3FSDFB59V7H573X",
+    "seq": 25,
+    "at": "2026-02-01T10:00:25Z",
+    "actor": {
+      "actor": "system"
+    },
+    "task_id": "tsk_01M1ZAJP8MYJMGAE0CPAC826R4",
+    "run": "run_01M1ZA1VZHX7VXSKQ9NZKNHBF1",
+    "kind": {
+      "type": "task.completed",
+      "result": {
+        "summary": "repository summarized",
+        "artifacts": [
+          "art_01M1ZAYTMRAP0MPJCG2ERCEA48"
+        ]
+      }
+    }
+  },
+  {
+    "id": "evt_01M1ZAG0PEWW2A8RE6MMT20G6Y",
+    "seq": 26,
+    "at": "2026-02-01T10:00:26Z",
+    "actor": {
+      "actor": "system"
+    },
+    "agent_id": "agt_01M1ZAW42J80EEMWTA0R66CMJ2",
+    "run": "run_01M1ZA1VZHX7VXSKQ9NZKNHBF1",
+    "kind": {
+      "type": "agent.completed",
+      "summary": "done"
+    }
+  }
+]

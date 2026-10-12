@@ -1,0 +1,24 @@
+── unicode 80 compact
+• Ran rg -n fsync_all crates/aether-store
+  └ (no output)
+── unicode 80 detail
+• Ran rg -n fsync_all crates/aether-store
+  └ ✓ exit 1 • 40ms
+── unicode 120 compact
+• Ran rg -n fsync_all crates/aether-store
+  └ (no output)
+── unicode 120 detail
+• Ran rg -n fsync_all crates/aether-store
+  └ ✓ exit 1 • 40ms
+── ascii 80 compact
+* Ran rg -n fsync_all crates/aether-store
+  \ (no output)
+── ascii 80 detail
+* Ran rg -n fsync_all crates/aether-store
+  \ + exit 1 * 40ms
+── ascii 120 compact
+* Ran rg -n fsync_all crates/aether-store
+  \ (no output)
+── ascii 120 detail
+* Ran rg -n fsync_all crates/aether-store
+  \ + exit 1 * 40ms

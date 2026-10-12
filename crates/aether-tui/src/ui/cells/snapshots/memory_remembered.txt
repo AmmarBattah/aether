@@ -1,0 +1,16 @@
+── unicode 80 compact
+• Remembered "WAL syncs stay off the request path"
+── unicode 80 detail
+• Remembered "WAL syncs stay off the request path"
+── unicode 120 compact
+• Remembered "WAL syncs stay off the request path"
+── unicode 120 detail
+• Remembered "WAL syncs stay off the request path"
+── ascii 80 compact
+* Remembered "WAL syncs stay off the request path"
+── ascii 80 detail
+* Remembered "WAL syncs stay off the request path"
+── ascii 120 compact
+* Remembered "WAL syncs stay off the request path"
+── ascii 120 detail
+* Remembered "WAL syncs stay off the request path"

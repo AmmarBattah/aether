@@ -1,0 +1,32 @@
+── unicode 80 compact
+• Spawned researcher [explorer] (sonnet-5.5 medium)
+  └ Find every caller of sync_all in the store and report which ones run on the
+    request path, with file and line for each.
+── unicode 80 detail
+• Spawned researcher [explorer] (sonnet-5.5 medium)
+  └ Find every caller of sync_all in the store and report which ones run on the
+    request path, with file and line for each.
+── unicode 120 compact
+• Spawned researcher [explorer] (sonnet-5.5 medium)
+  └ Find every caller of sync_all in the store and report which ones run on the request path, with file and line for
+    each.
+── unicode 120 detail
+• Spawned researcher [explorer] (sonnet-5.5 medium)
+  └ Find every caller of sync_all in the store and report which ones run on the request path, with file and line for
+    each.
+── ascii 80 compact
+* Spawned researcher [explorer] (sonnet-5.5 medium)
+  \ Find every caller of sync_all in the store and report which ones run on the
+    request path, with file and line for each.
+── ascii 80 detail
+* Spawned researcher [explorer] (sonnet-5.5 medium)
+  \ Find every caller of sync_all in the store and report which ones run on the
+    request path, with file and line for each.
+── ascii 120 compact
+* Spawned researcher [explorer] (sonnet-5.5 medium)
+  \ Find every caller of sync_all in the store and report which ones run on the request path, with file and line for
+    each.
+── ascii 120 detail
+* Spawned researcher [explorer] (sonnet-5.5 medium)
+  \ Find every caller of sync_all in the store and report which ones run on the request path, with file and line for
+    each.

@@ -1,0 +1,18 @@
+event: response.created
+data: {"type":"response.created","response":{"id":"resp_conformance","model":"gpt-5","status":"in_progress"}}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":0,"item":{"id":"msg_1","type":"message","role":"assistant"}}
+
+event: response.content_part.added
+data: {"type":"response.content_part.added","item_id":"msg_1","output_index":0,"content_index":0,"part":{"type":"refusal","refusal":""}}
+
+event: response.refusal.delta
+data: {"type":"response.refusal.delta","item_id":"msg_1","output_index":0,"content_index":0,"delta":"I can't help with that."}
+
+event: response.content_part.done
+data: {"type":"response.content_part.done","item_id":"msg_1","output_index":0,"content_index":0,"part":{"type":"refusal","refusal":"I can't help with that."}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_conformance","status":"completed","usage":{"input_tokens":4,"output_tokens":6}}}
+

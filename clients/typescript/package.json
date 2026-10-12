@@ -1,0 +1,23 @@
+{
+  "name": "@aether/client",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Hand-written TypeScript client for the Aether daemon protocol.",
+  "exports": {
+    ".": "./src/client.ts",
+    "./protocol": "./src/protocol.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "example": "node --experimental-strip-types examples/list-and-stream.ts"
+  },
+  "engines": {
+    "node": ">=22.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.9.0"
+  }
+}

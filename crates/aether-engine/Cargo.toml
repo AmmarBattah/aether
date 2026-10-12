@@ -1,0 +1,38 @@
+[package]
+name = "aether-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Native CLI engine adapters and their control and stream protocols for the Aether agent harness"
+
+[lints]
+workspace = true
+
+[dependencies]
+aether-core = { workspace = true }
+aether-protocol = { workspace = true }
+aether-client = { workspace = true }
+aether-tools = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+hex = { workspace = true }
+nix = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+ulid = { workspace = true }
+
+tempfile = { workspace = true }
+
+[dev-dependencies]
+aether-context = { workspace = true }
+nix = { workspace = true, features = ["socket"] }

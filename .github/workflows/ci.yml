@@ -1,0 +1,121 @@
+name: ci
+
+# Every job runs on a GitHub-hosted runner with a read-only token and no secrets,
+# so a pull request from a fork gets nothing a public clone would not.
+on:
+  # No path filter here: a workflow that a filter skips leaves a required check
+  # waiting forever. The jobs start, and stop early for a documentation change.
+  pull_request:
+  push:
+    branches: [main]
+    # Documentation alone starts nothing; the same paths as scripts/ci_scope.sh.
+    paths:
+      - "**"
+      - "!**/*.md"
+      - "!docs/**"
+      - "!LICENSE"
+      - "!.github/**"
+      - ".github/workflows/**"
+      # `cargo test` reads these two.
+      - "docs/engines.md"
+      - "docs/tui.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  # With full debug info the debug test binaries outgrow a hosted runner's disk.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+
+jobs:
+  linux:
+    name: ${{ matrix.stage }}
+    runs-on: ubuntu-latest
+    # A cold cache builds the whole workspace from scratch; a warm one is far quicker.
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        stage: [lint, test, binary]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # A pull request is checked out as its merge commit; the parent is needed too.
+          fetch-depth: 2
+      # Every later step is skipped for a pull request that changes documentation only.
+      - name: does this change need the Rust checks
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            # The first parent of the merge commit is the base branch.
+            git diff --name-only HEAD^1 HEAD | scripts/ci_scope.sh | tee -a "$GITHUB_OUTPUT"
+          else
+            echo "code=true" | tee -a "$GITHUB_OUTPUT"
+          fi
+      # The one check of scripts/ci.sh that reads only documents.
+      - if: steps.scope.outputs.code != 'true' && matrix.stage == 'lint'
+        name: links and anchors in the documents
+        run: python3 scripts/check_links.py
+      - if: steps.scope.outputs.code == 'true'
+        name: install the Rust toolchain pinned by rust-toolchain.toml
+        run: |
+          channel=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)
+          rustup toolchain install "$channel" --profile minimal --component clippy --component rustfmt
+          cargo --version
+      # Only main saves a cache, so a pull request can read one but never write one.
+      - if: steps.scope.outputs.code == 'true'
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: ${{ matrix.stage }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - if: steps.scope.outputs.code == 'true' && matrix.stage == 'binary'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+      # scripts/ci.sh skips a check whose tool is missing, so prove each one is here.
+      - if: steps.scope.outputs.code == 'true' && matrix.stage == 'lint'
+        name: install and verify the tools the lint checks need
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends shellcheck
+          shellcheck --version
+      - if: steps.scope.outputs.code == 'true' && matrix.stage == 'binary'
+        name: install and verify the tools the binary checks need
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends tmux python3-pil dash
+          tmux -V
+          dash -c 'echo dash runs'
+          node --version
+          npm --version
+          python3 -c 'import sys, PIL; assert sys.version_info >= (3, 11), sys.version'
+      - if: steps.scope.outputs.code == 'true'
+        name: scripts/ci.sh ${{ matrix.stage }}
+        run: |
+          mkdir -p "$TMPDIR"
+          ./scripts/ci.sh "${{ matrix.stage }}"
+        env:
+          TMPDIR: ${{ runner.temp }}/aether-ci
+      - if: failure() && matrix.stage == 'binary'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: binary-check-logs
+          path: |
+            ${{ runner.temp }}/aether-ci
+            target/pb-*
+          if-no-files-found: ignore

@@ -1,0 +1,60 @@
+── unicode 80 compact
+• The flake comes from WAL syncs on the request path.
+
+  - fsync blocks the writer
+  - readers wait on the lock
+
+  Moving the sync to a background task fixes both, see the PR
+  (https://example.com/pr/283).
+── unicode 80 detail
+• The flake comes from WAL syncs on the request path.
+
+  - fsync blocks the writer
+  - readers wait on the lock
+
+  Moving the sync to a background task fixes both, see the PR
+  (https://example.com/pr/283).
+── unicode 120 compact
+• The flake comes from WAL syncs on the request path.
+
+  - fsync blocks the writer
+  - readers wait on the lock
+
+  Moving the sync to a background task fixes both, see the PR (https://example.com/pr/283).
+── unicode 120 detail
+• The flake comes from WAL syncs on the request path.
+
+  - fsync blocks the writer
+  - readers wait on the lock
+
+  Moving the sync to a background task fixes both, see the PR (https://example.com/pr/283).
+── ascii 80 compact
+* The flake comes from WAL syncs on the request path.
+
+  - fsync blocks the writer
+  - readers wait on the lock
+
+  Moving the sync to a background task fixes both, see the PR
+  (https://example.com/pr/283).
+── ascii 80 detail
+* The flake comes from WAL syncs on the request path.
+
+  - fsync blocks the writer
+  - readers wait on the lock
+
+  Moving the sync to a background task fixes both, see the PR
+  (https://example.com/pr/283).
+── ascii 120 compact
+* The flake comes from WAL syncs on the request path.
+
+  - fsync blocks the writer
+  - readers wait on the lock
+
+  Moving the sync to a background task fixes both, see the PR (https://example.com/pr/283).
+── ascii 120 detail
+* The flake comes from WAL syncs on the request path.
+
+  - fsync blocks the writer
+  - readers wait on the lock
+
+  Moving the sync to a background task fixes both, see the PR (https://example.com/pr/283).

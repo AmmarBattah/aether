@@ -1,0 +1,73 @@
+# Official PyPI release JSON SHA-256 values, verified 2026-09-15.
+# Install with --require-hashes --only-binary=:all:; no source builds.
+# CPython 3.11-3.14: Linux glibc 2.27+ x86_64/aarch64; macOS 14+ arm64.
+# No Windows, Intel macOS, PyPy, or free-threaded interpreter support.
+# Piper trusted publisher: OHF-Voice/piper1-gpl@639388b6317fc4731e91d53da42aea68fd4166ff.
+# https://pypi.org/project/piper-tts/1.8.0/#files
+
+# https://pypi.org/pypi/piper-tts/1.8.0/json
+piper-tts==1.8.0 \
+    --hash=sha256:33e7425933e9290fe651ae127916ed1ca6104cfa3d94e9049295dd3a5c449382 \
+    --hash=sha256:3f60c1917de6d8e8033f395878ad3f88f6dfee88a8b05f98971a275f76a38484 \
+    --hash=sha256:25b4d3f31ff70c8fa7151908e00aaa5650cbdf16bca8fcf21299f3941b89a7d3
+
+# https://pypi.org/pypi/onnxruntime/1.24.3/json
+onnxruntime==1.24.3 \
+    --hash=sha256:3e6456801c66b095c5cd68e690ca25db970ea5202bd0c5b84a2c3ef7731c5a3c \
+    --hash=sha256:8b2ebc54c6d8281dccff78d4b06e47d4cf07535937584ab759448390a70f4978 \
+    --hash=sha256:fb56575d7794bf0781156955610c9e651c9504c64d42ec880784b6106244882d \
+    --hash=sha256:0d244227dc5e00a9ae15a7ac1eba4c4460d7876dfecafe73fb00db9f1d914d91 \
+    --hash=sha256:0a9847b870b6cb462652b547bc98c49e0efb67553410a082fde1918a38707452 \
+    --hash=sha256:b354afce3333f2859c7e8706d84b6c552beac39233bcd3141ce7ab77b4cabb5d \
+    --hash=sha256:34a0ea5ff191d8420d9c1332355644148b1bf1a0d10c411af890a63a9f662aa7 \
+    --hash=sha256:1fd2ec7bb0fabe42f55e8337cfc9b1969d0d14622711aac73d69b4bd5abb5ed7 \
+    --hash=sha256:df8e70e732fe26346faaeec9147fa38bef35d232d2495d27e93dd221a2d473a9 \
+    --hash=sha256:a6b4bce87d96f78f0a9bf5cefab3303ae95d558c5bfea53d0bf7f9ea207880a8 \
+    --hash=sha256:d48f36c87b25ab3b2b4c88826c96cf1399a5631e3c2c03cc27d6a1e5d6b18eb4 \
+    --hash=sha256:e104d33a409bf6e3f30f0e8198ec2aaf8d445b8395490a80f6e6ad56da98e400
+
+# https://pypi.org/pypi/numpy/2.4.3/json
+numpy==2.4.3 \
+    --hash=sha256:8ba7b51e71c05aa1f9bc3641463cd82308eab40ce0d5c7e1fd4038cbf9938147 \
+    --hash=sha256:a1988292870c7cb9d0ebb4cc96b4d447513a9644801de54606dc7aabf2b7d920 \
+    --hash=sha256:a016db5c5dba78fa8fe9f5d80d6708f9c42ab087a739803c0ac83a43d686a470 \
+    --hash=sha256:715de7f82e192e8cae5a507a347d97ad17598f8e026152ca97233e3666daaa71 \
+    --hash=sha256:7395e69ff32526710748f92cd8c9849b361830968ea3e24a676f272653e8983e \
+    --hash=sha256:abdce0f71dcb4a00e4e77f3faf05e4616ceccfe72ccaa07f47ee79cda3b7b0f4 \
+    --hash=sha256:32e3bef222ad6b052280311d1d60db8e259e4947052c3ae7dd6817451fc8a4c5 \
+    --hash=sha256:e7dd01a46700b1967487141a66ac1a3cf0dd8ebf1f08db37d46389401512ca97 \
+    --hash=sha256:2629289168f4897a3c4e23dc98d6f1731f0fc0fe52fb9db19f974041e4cc12b9 \
+    --hash=sha256:bb2e3cf95854233799013779216c57e153c1ee67a0bf92138acca0e429aefaee \
+    --hash=sha256:decb0eb8a53c3b009b0962378065589685d66b23467ef5dac16cbe818afde27f \
+    --hash=sha256:d5f51900414fc9204a0e0da158ba2ac52b75656e7dce7e77fb9f84bfa343b4cc \
+    --hash=sha256:297837823f5bc572c5f9379b0c9f3a3365f08492cbdc33bcc3af174372ebb168 \
+    --hash=sha256:a111698b4a3f8dcbe54c64a7708f049355abd603e619013c346553c1fd4ca90b \
+    --hash=sha256:54f29b877279d51e210e0c80709ee14ccbbad647810e8f3d375561c45ef613dd \
+    --hash=sha256:679f2a834bae9020f81534671c56fd0cc76dd7e5182f57131478e23d0dc59e24
+
+# https://pypi.org/pypi/flatbuffers/25.12.19/json
+flatbuffers==25.12.19 \
+    --hash=sha256:7634f50c427838bb021c2d66a3d1168e9d199b0607e6329399f04846d42e20b4
+
+# https://pypi.org/pypi/packaging/26.0/json
+packaging==26.0 \
+    --hash=sha256:b36f1fef9334a5588b4166f8bcd26a14e521f2b55e6b9de3aaa80d3ff7a37529
+
+# https://pypi.org/pypi/protobuf/6.33.5/json
+protobuf==6.33.5 \
+    --hash=sha256:a5cb85982d95d906df1e2210e58f8e4f1e3cdc088e52c921a041f9c9a0386de5 \
+    --hash=sha256:9b71e0281f36f179d00cbcb119cb19dec4d14a81393e5ea220f64b286173e190 \
+    --hash=sha256:cbf16ba3350fb7b889fca858fb215967792dc125b35c7976ca4818bee3521cf0 \
+    --hash=sha256:69915a973dd0f60f31a08b8318b73eab2bd6a392c79184b3612226b0a3f8ec02
+
+# https://pypi.org/pypi/pathvalidate/3.3.1/json
+pathvalidate==3.3.1 \
+    --hash=sha256:5263baab691f8e1af96092fa5137ee17df5bdfbd6cff1fcac4d6ef4bc2e1735f
+
+# https://pypi.org/pypi/sympy/1.14.0/json
+sympy==1.14.0 \
+    --hash=sha256:e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5
+
+# https://pypi.org/pypi/mpmath/1.3.0/json
+mpmath==1.3.0 \
+    --hash=sha256:a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c

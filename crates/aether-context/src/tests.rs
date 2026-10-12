@@ -1,0 +1,442 @@
+use super::*;
+use aether_core::agent::{AgentConfig, AgentStats, AgentStatus, Role, Scope};
+use aether_core::event::Actor;
+use aether_core::id::{AgentId, InboxItemId, RunId};
+use aether_core::inbox::InboxKind;
+use aether_core::model::{ContentBlock, MessageRole, ModelRef};
+use aether_core::task::TaskResult;
+use aether_core::time::now;
+
+fn agent() -> Agent {
+    let at = now();
+    Agent {
+        id: AgentId::new(),
+        parent: None,
+        role: Role::new("assistant"),
+        name: "main".into(),
+        scope: Scope {
+            workspace_root: Some("/repo".into()),
+            ..Default::default()
+        },
+        model: ModelRef::new("mock", "m"),
+        fallbacks: Vec::new(),
+        status: AgentStatus::Ready,
+        current_task: None,
+        inbox_cursor: 0,
+        checkpoint: None,
+        engine_session: None,
+        engine_usage: None,
+        engine_sent: None,
+        status_since: None,
+        archived: false,
+        paused: false,
+        paused_via: None,
+        resume_wait: None,
+        restarted_from: None,
+        restarted_as: None,
+        config: AgentConfig {
+            effort: Some(aether_core::model::Effort::High),
+            ..Default::default()
+        },
+        stats: AgentStats::default(),
+        run: RunId::new(),
+        created_at: at,
+        updated_at: at,
+    }
+}
+
+fn entry(role: MessageRole, text: &str, seq: u64) -> TranscriptEntry {
+    TranscriptEntry {
+        seq,
+        at: now(),
+        message: Message {
+            role,
+            content: vec![ContentBlock::text(text)],
+        },
+        invocation: None,
+    }
+}
+
+fn caps() -> CapabilityProfile {
+    CapabilityProfile {
+        context_window: 200_000,
+        max_output_tokens: 8_000,
+        effort: true,
+        thinking: ThinkingSupport::Adaptive,
+        prompt_caching: true,
+        ..Default::default()
+    }
+}
+
+fn inputs<'a>(
+    agent: &'a Agent,
+    task: Option<&'a Task>,
+    transcript: &'a [TranscriptEntry],
+    inbox: &'a [InboxItem],
+    caps: &'a CapabilityProfile,
+) -> ContextInputs<'a> {
+    ContextInputs {
+        agent,
+        task,
+        children: &[],
+        child_tasks: &[],
+        pending_inbox: inbox,
+        pending_approvals: &[],
+        checkpoint: None,
+        transcript,
+        memories: &[],
+        tools: vec![],
+        model_profile: None,
+        engine_policy: None,
+        capabilities: caps,
+        adapter: "scripted/1",
+        turn: 1,
+        now: now(),
+    }
+}
+
+#[test]
+fn default_context_has_no_policy_for_roots_or_leaves() {
+    let mut a = agent();
+    let c = caps();
+    for leaf in [false, true] {
+        a.config.leaf = leaf;
+        let assembled = ContextManager::new().assemble(inputs(&a, None, &[], &[], &c));
+        let layer = assembled
+            .snapshot
+            .layers
+            .iter()
+            .find(|layer| layer.kind == LayerKind::HarnessPolicy)
+            .unwrap();
+        assert!(layer.text.is_none());
+        assert_eq!(layer.tokens, 0);
+        assert_eq!(layer.items, 0);
+        assert!(
+            assembled
+                .request
+                .system
+                .iter()
+                .all(|block| !block.text.is_empty())
+        );
+    }
+}
+
+#[test]
+fn explicitly_supplied_policy_is_preserved() {
+    let manager = ContextManager::new().with_policy("custom policy\n");
+    assert_eq!(
+        manager.policy_text(Some("engine policy")),
+        Some("custom policy\n\nengine policy".into())
+    );
+    assert_eq!(ContextManager::new().policy_text(Some(" \n")), None);
+}
+
+#[test]
+fn engine_status_does_not_repeat_growing_fleet_history() {
+    let a = agent();
+    let c = caps();
+    let children: Vec<_> = (0..1_000).map(|_| agent()).collect();
+    let tasks: Vec<_> = (0..1_000)
+        .map(|_| {
+            Task::new(
+                "large historical objective ".repeat(1_000),
+                Actor::user(),
+                a.run,
+                now(),
+            )
+        })
+        .collect();
+    let mut input = inputs(&a, None, &[], &[], &c);
+    input.children = &children;
+    input.child_tasks = &tasks;
+    let text = render::engine_runtime_state(&input);
+    assert!(text.contains("Turn 1."));
+    assert!(text.contains("ready=1000"), "{text}");
+    assert!(text.contains("Created tasks:"));
+    assert!(text.contains("list_tasks"));
+    assert!(text.contains("read_task"));
+    assert!(!text.contains("large historical objective"));
+    assert!(text.len() < 2_000, "{} bytes", text.len());
+    // API assembly keeps its established detailed state representation.
+    assert!(render::runtime_state(&input).contains("large historical objective"));
+}
+
+#[test]
+fn engine_status_leaves_the_effort_to_the_cli_and_keeps_the_other_figures() {
+    let mut a = agent();
+    a.config.effort = Some(aether_core::model::Effort::Low);
+    a.config.token_budget = Some(5_000);
+    a.config.max_turns = Some(9);
+    a.stats.turns = 2;
+    let c = caps();
+    let mut input = inputs(&a, None, &[], &[], &c);
+    input.turn = 3;
+    let text = render::engine_runtime_state(&input);
+    assert!(!text.contains("Effort"), "{text}");
+    assert!(!text.to_lowercase().contains("low"), "{text}");
+    assert_eq!(
+        text,
+        "Turn 3. Token budget remaining: 5000. Turns used 2/9."
+    );
+    // The API path has no CLI flag, so its status line still states it.
+    assert_eq!(
+        render::runtime_state(&input),
+        "Turn 3. Effort low. Token budget remaining: 5000. Turns used 2/9."
+    );
+}
+
+#[test]
+fn engine_status_keeps_failed_children_visible_beyond_the_detail_limit() {
+    let a = agent();
+    let c = caps();
+    let mut children: Vec<_> = (0..20).map(|_| agent()).collect();
+    children[19].status = AgentStatus::Failed {
+        error: "provider unavailable".into(),
+    };
+    let mut input = inputs(&a, None, &[], &[], &c);
+    input.children = &children;
+    let text = render::engine_runtime_state(&input);
+    assert!(text.contains(&children[19].id.to_string()), "{text}");
+    assert!(text.contains("failed=1"));
+    assert_eq!(
+        text.lines().filter(|line| line.starts_with("- ")).count(),
+        8
+    );
+    assert!(!text.contains(&children[18].id.to_string()));
+}
+
+#[test]
+fn inbox_becomes_the_new_user_turn() {
+    let a = agent();
+    let task = Task::new("Ship it", Actor::user(), a.run, now());
+    let c = caps();
+    let transcript = vec![
+        entry(MessageRole::User, "hi", 1),
+        entry(MessageRole::Assistant, "hello", 2),
+    ];
+    let child_task = TaskId::new();
+    let inbox = vec![InboxItem {
+        id: InboxItemId::new(),
+        agent_id: a.id,
+        seq: 1,
+        kind: InboxKind::TaskCompleted {
+            task: child_task,
+            result: TaskResult::summary("done the thing"),
+        },
+        delivered_at: now(),
+    }];
+    let out = ContextManager::new().assemble(inputs(&a, Some(&task), &transcript, &inbox, &c));
+    assert_eq!(out.consumed_up_to, Some(1));
+    assert_eq!(out.consumed_inbox.len(), 1);
+    let user = out.new_user_message.expect("new user message");
+    assert_eq!(user.role, MessageRole::User);
+    assert!(user.text().contains("done the thing"));
+    assert!(user.text().contains(&child_task.to_string()));
+    assert_eq!(out.snapshot.messages.len(), 3);
+    assert_eq!(
+        out.snapshot.messages.last().map(|m| m.role),
+        Some(MessageRole::User)
+    );
+    assert!(!out.needs_compaction);
+    // Stable system layers first, cache breakpoint on the role/task layer.
+    let cached: Vec<bool> = out.request.system.iter().map(|b| b.cache).collect();
+    assert_eq!(cached, vec![true, false]);
+    assert_eq!(out.request.effort, Some(aether_core::model::Effort::High));
+    assert_eq!(out.request.thinking, Some(ThinkingMode::Adaptive));
+    assert_eq!(
+        out.request.extensions.get("anthropic.thinking_display"),
+        Some(&serde_json::Value::String("summarized".into()))
+    );
+    assert!(out.snapshot.system_text().contains("Ship it"));
+    assert_eq!(out.snapshot.adapter.as_deref(), Some("scripted/1"));
+}
+
+use aether_core::id::TaskId;
+
+#[test]
+fn empty_transcript_gets_a_user_turn_from_the_task() {
+    let a = agent();
+    let task = Task::new("Write tests", Actor::user(), a.run, now());
+    let c = caps();
+    let out = ContextManager::new().assemble(inputs(&a, Some(&task), &[], &[], &c));
+    assert!(out.synthesized_task_message);
+    assert_eq!(out.request.messages[0].text(), "Your task:\nWrite tests");
+    assert_eq!(out.snapshot.messages.len(), 1);
+    assert_eq!(out.snapshot.messages[0].role, MessageRole::User);
+    assert!(
+        out.new_user_message.is_some(),
+        "the nudge must be persisted too"
+    );
+}
+
+#[test]
+fn existing_messages_and_continuations_are_not_synthetic_task_input() {
+    let a = agent();
+    let task = Task::new("Write tests", Actor::user(), a.run, now());
+    let c = caps();
+    for role in [MessageRole::User, MessageRole::Assistant] {
+        let transcript = [entry(role, "Your task:\nWrite tests", 1)];
+        let out = ContextManager::new().assemble(inputs(&a, Some(&task), &transcript, &[], &c));
+        assert!(!out.synthesized_task_message);
+    }
+    let out = ContextManager::new().assemble(inputs(&a, None, &[], &[], &c));
+    assert!(!out.synthesized_task_message);
+    let inbox = [InboxItem {
+        id: InboxItemId::new(),
+        agent_id: a.id,
+        seq: 1,
+        kind: InboxKind::Message {
+            message_id: aether_core::id::MessageId::new(),
+            from: Actor::user(),
+            content: vec![ContentBlock::text("Your task:\nWrite tests")],
+        },
+        delivered_at: now(),
+    }];
+    let out = ContextManager::new().assemble(inputs(&a, Some(&task), &[], &inbox, &c));
+    assert!(!out.synthesized_task_message);
+    assert!(
+        out.new_user_message
+            .unwrap()
+            .text()
+            .contains("Your task:\nWrite tests")
+    );
+}
+
+#[test]
+fn oversized_tail_is_dropped_from_the_front_and_flags_compaction() {
+    let a = agent();
+    // The transcript alone must exceed the window, independently of
+    // changes to the fixed state layers or optional policy.
+    let window = 8_000;
+    let c = CapabilityProfile {
+        context_window: window,
+        max_output_tokens: 1_000,
+        ..Default::default()
+    };
+    let big = "x".repeat(window as usize);
+    let transcript: Vec<TranscriptEntry> = (0..10)
+        .map(|i| {
+            let role = if i % 2 == 0 {
+                MessageRole::User
+            } else {
+                MessageRole::Assistant
+            };
+            entry(role, &big, i)
+        })
+        .collect();
+    let out = ContextManager::new().assemble(inputs(&a, None, &transcript, &[], &c));
+    assert!(out.needs_compaction, "still over the compaction threshold");
+    assert!(
+        out.dropped_messages > 0,
+        "some of the ten oversized messages must be dropped"
+    );
+    assert!(
+        out.dropped_messages < transcript.len(),
+        "the whole tail must not be dropped, or this stops testing tail-dropping: {}/{}",
+        out.dropped_messages,
+        transcript.len()
+    );
+    assert_eq!(
+        out.snapshot.messages.first().map(|m| m.role),
+        Some(MessageRole::User),
+        "the kept tail must still start on a user turn"
+    );
+    assert!(
+        out.snapshot.token_estimate <= window,
+        "the assembled snapshot exceeded its own budget: {}",
+        out.snapshot.token_estimate
+    );
+}
+
+#[test]
+fn memory_layer_respects_its_budget() {
+    let a = agent();
+    let c = caps();
+    let mut mems = Vec::new();
+    for i in 0..50 {
+        mems.push(MemoryRecord::from_candidate(
+            aether_core::memory::MemoryCandidate {
+                scope: aether_core::memory::MemoryScope::Global,
+                kind: aether_core::memory::MemoryKind::Fact,
+                text: format!("fact number {i} {}", "detail ".repeat(40)),
+                structured: None,
+                importance: 0.5,
+                confidence: 0.5,
+                tags: vec![],
+                provenance: Default::default(),
+                supersedes: None,
+            },
+            now(),
+        ));
+    }
+    let mut inp = inputs(&a, None, &[], &[], &c);
+    inp.memories = &mems;
+    let out = ContextManager::new().assemble(inp);
+    let layer = out
+        .snapshot
+        .layers
+        .iter()
+        .find(|l| l.kind == LayerKind::RetrievedMemory)
+        .expect("layer");
+    assert!(layer.items < 50);
+    assert!(layer.tokens <= ContextBudget::for_profile(&c, None).memory_max);
+    assert_eq!(out.snapshot.memory_ids.len() as u32, layer.items);
+}
+
+#[test]
+fn memory_budget_includes_headings_and_section_separators() {
+    use aether_core::memory::{MemoryCandidate, MemoryKind, MemoryScope, MemorySource};
+
+    let a = agent();
+    let c = CapabilityProfile {
+        context_window: 16_000,
+        max_output_tokens: 1_000,
+        ..Default::default()
+    };
+    let maximum = ContextBudget::for_profile(&c, None).memory_max;
+    for sources in [vec![false], vec![true], vec![false, true]] {
+        let memories: Vec<_> = sources
+            .iter()
+            .map(|from_file| {
+                let mut record = MemoryRecord::from_candidate(
+                    MemoryCandidate {
+                        scope: MemoryScope::Global,
+                        kind: MemoryKind::Fact,
+                        text: "x".repeat(if sources.len() == 1 { 1_330 } else { 580 }),
+                        structured: None,
+                        importance: 0.5,
+                        confidence: 0.5,
+                        tags: vec![],
+                        provenance: Default::default(),
+                        supersedes: None,
+                    },
+                    now(),
+                );
+                if *from_file {
+                    record.provenance.source = Some(MemorySource {
+                        file: "notes.md".into(),
+                        commit: None,
+                    });
+                }
+                record
+            })
+            .collect();
+        let line_tokens: u32 = memories
+            .iter()
+            .map(|record| TokenEstimator.text(&render::memory_line(record)))
+            .sum();
+        assert!(line_tokens <= maximum, "lines alone fit: {line_tokens}");
+        let mut input = inputs(&a, None, &[], &[], &c);
+        input.memories = &memories;
+        let assembled = ContextManager::new().assemble(input);
+        let layer = assembled
+            .snapshot
+            .layers
+            .iter()
+            .find(|layer| layer.kind == LayerKind::RetrievedMemory)
+            .unwrap();
+        assert!(layer.tokens <= maximum, "sources={sources:?}: {layer:?}");
+        assert_eq!(layer.items as usize, sources.len() - 1);
+        assert_eq!(assembled.snapshot.memory_ids.len(), layer.items as usize);
+    }
+}

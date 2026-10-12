@@ -1,0 +1,73 @@
+# Documentation
+
+Start with the [README](../README.md) for prerequisites, installation, and a first task.
+
+## Current guides
+
+- [Install, update, uninstall](install.md): the installer, `aether update`,
+  checksums, where files live, and building from source.
+- [User guide](guide.md): models, delegation, supervision, automation, and recovery.
+- [Prerequisite details](prerequisites.md): optional programs and feature-specific setup.
+- [Configuration](configuration.md): common settings, defaults, and storage paths.
+- [Harness measurements](benchmarks.md): the detailed comparisons formerly in the README.
+- [Development](development.md): build, test, and CI entry points.
+- [Architecture](../ARCHITECTURE.md): ownership, execution paths, persistence,
+  and where code lives.
+- [Engine integration](engines.md): native Claude Code/Codex behavior and the
+  adapter contract.
+- [Harness tools](harness-tools.md): Aether coordination and background-work
+  semantics.
+- [MCP servers](mcp-servers.md): configured servers and the caller identity
+  each call carries in `_meta`.
+- [Daemon protocol](protocol.md): request correlation and malformed-frame errors.
+- [GitHub watcher](github-watcher.md): fixed/per-thread routing, permissions,
+  matching, and live configuration.
+- [Terminal UI](tui.md): layout, the agents board, approvals, keys, and
+  commands.
+- [Local voice](voice.md): dictation, speech, setup, and opt-in controls.
+- [Theme overrides](theme-overrides.md): the accent colour override.
+- [Retention](log-retention.md): logs, completed-run history, and exclusions.
+- [Diagnostic bundles](diagnose.md): read-only collection, run cursors and redaction.
+- [Migration backups](migration-backups.md): database rollback snapshots.
+- [Status timestamps](status-time.md): accurate state-duration semantics.
+- [CI](ci.md): local/hosted checks and optional lanes.
+- [Known limitations](known-limitations.md): security boundaries and remaining gaps.
+- [Benchmarks against the native harnesses](#benchmark-reports): dated
+  reports with their method, raw tables and limits.
+- [Configuration templates](../crates/aether-model/src/config/templates.rs):
+  supported settings and shipped defaults.
+- [Python client](../clients/python/README.md) and
+  [TypeScript client](../clients/typescript/README.md).
+- [Evaluation tooling](../evals/README.md): reproducible experiments, not a
+  blanket claim of model parity.
+
+## Benchmark reports
+
+Each report states the binary, the cases, the seeds and what it does not
+show. Reports are never pooled across protocol versions. To run a comparison
+yourself, see the [evaluation tooling](../evals/README.md) and its
+[protocol](../evals/harness_bench_protocol.md).
+
+- [Native versus Aether, six cases, second sitting](harness-bench-2026-10-11.md):
+  Haiku 5.5 and GPT-6 Luna at medium effort, 72 trials on six held-out-graded
+  tasks under protocol version 2, with paired statistics.
+- [Native versus Aether, six cases, first sitting](harness-bench-2026-10-10.md):
+  the same 72 trials under protocol version 1.
+- [Lower-tier comparison](harness-lower-tier-results-2026-10-10.md): five
+  counted runs of matched Haiku 5.5 and GPT-6 Luna low-effort cells on two
+  cases, native against Aether.
+- [Lower-tier comparison, protocol version 2](harness-lower-tier-results-2026-10-10-protocol-2.md):
+  five planned runs after Aether stopped repeating the effort in words and
+  both sides of a Claude pair started with the same MCP set.
+- [Lower-tier comparison, counted again](harness-lower-tier-results-2026-10-11.md):
+  five more planned runs under protocol version 2, with paired statistics
+  over those runs and over all ten.
+- [Harness overhead diagnosis](harness-overhead-diagnosis-2026-10-10.md):
+  diagnostic arms, never counted, that look for why those two models behave
+  differently through Aether than natively.
+
+## Contributing
+
+See [CONTRIBUTING.md](../CONTRIBUTING.md) for how to build, test and propose a
+change, [SECURITY.md](../SECURITY.md) for reporting a vulnerability, and the
+[changelog](../CHANGELOG.md) for what changed between releases.

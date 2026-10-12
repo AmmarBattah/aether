@@ -1,0 +1,240 @@
+{
+  "agents": [
+    {
+      "created_at": "2026-02-01T10:00:01Z",
+      "depth": 0,
+      "ended_at": "2026-02-01T10:00:26Z",
+      "id": "agt#0",
+      "model": {
+        "model": "mock-1",
+        "provider": "mock"
+      },
+      "name": "root",
+      "outcome": {
+        "outcome": "completed",
+        "summary": "done"
+      },
+      "role": "assistant",
+      "subtree_usage": {
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cost_usd": 0.036000000000000004,
+        "cost_complete": true,
+    "cost_basis": "unknown",
+        "input_tokens": 2500,
+        "output_tokens": 120
+      },
+      "tool_calls": 1,
+      "turns": 1,
+      "usage": {
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cost_usd": 0.032,
+        "cost_complete": true,
+    "cost_basis": "unknown",
+        "input_tokens": 2100,
+        "output_tokens": 100
+      }
+    },
+    {
+      "created_at": "2026-02-01T10:00:13Z",
+      "depth": 1,
+      "ended_at": "2026-02-01T10:00:22Z",
+      "id": "agt#1",
+      "model": {
+        "model": "mock-1",
+        "provider": "mock"
+      },
+      "name": "reader",
+      "outcome": {
+        "outcome": "completed",
+        "summary": "reported the missing manifest"
+      },
+      "parent": "agt#0",
+      "role": "worker",
+      "subtree_usage": {
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cost_usd": 0.004,
+        "cost_complete": true,
+    "cost_basis": "unknown",
+        "input_tokens": 400,
+        "output_tokens": 20
+      },
+      "tool_calls": 1,
+      "turns": 1,
+      "usage": {
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cost_usd": 0.004,
+        "cost_complete": true,
+    "cost_basis": "unknown",
+        "input_tokens": 400,
+        "output_tokens": 20
+      }
+    }
+  ],
+  "approvals": [
+    {
+      "decided_at": "2026-02-01T10:00:08Z",
+      "decided_by": {
+        "actor": "user"
+      },
+      "decision": "approved",
+      "description": "ls",
+      "id": "apr#2",
+      "requested_at": "2026-02-01T10:00:07Z",
+      "tool": "bash"
+    }
+  ],
+  "artifacts": [
+    {
+      "agent": "agt#0",
+      "created_at": "2026-02-01T10:00:10Z",
+      "evicted": false,
+      "id": "art#3",
+      "kind": "command_output",
+      "name": "ls output",
+      "size_bytes": 480,
+      "summary": "12 entries",
+      "task": "tsk#4"
+    }
+  ],
+  "duration_ms": 25000,
+  "ended_at": "2026-02-01T10:00:26Z",
+  "events": 26,
+  "failures": [
+    {
+      "agent": "agt#1",
+      "at": "2026-02-01T10:00:19Z",
+      "error": "no such file",
+      "kind": "tool.failed"
+    }
+  ],
+  "objective": "summarize the repository",
+  "open_loops": [],
+  "outcome": "completed",
+  "started_at": "2026-02-01T10:00:01Z",
+  "tasks": [
+    {
+      "created_at": "2026-02-01T10:00:02Z",
+      "dependencies": [],
+      "ended_at": "2026-02-01T10:00:25Z",
+      "id": "tsk#4",
+      "objective": "summarize the repository",
+      "outcome": {
+        "outcome": "completed",
+        "summary": "repository summarized"
+      },
+      "owner": "agt#0",
+      "priority": "normal"
+    },
+    {
+      "created_at": "2026-02-01T10:00:14Z",
+      "dependencies": [
+        "tsk#4"
+      ],
+      "ended_at": "2026-02-01T10:00:21Z",
+      "id": "tsk#5",
+      "objective": "read the manifest",
+      "outcome": {
+        "outcome": "completed",
+        "summary": "manifest missing; reported"
+      },
+      "owner": "agt#1",
+      "parent_task": "tsk#4",
+      "priority": "high"
+    }
+  ],
+  "timeline": [
+    {
+      "agent": "agt#0",
+      "at": "2026-02-01T10:00:01Z",
+      "detail": "root (assistant)",
+      "kind": "agent.created"
+    },
+    {
+      "at": "2026-02-01T10:00:02Z",
+      "detail": "summarize the repository",
+      "kind": "task.created"
+    },
+    {
+      "agent": "agt#0",
+      "at": "2026-02-01T10:00:07Z",
+      "detail": "bash: ls",
+      "kind": "approval.requested"
+    },
+    {
+      "agent": "agt#0",
+      "at": "2026-02-01T10:00:08Z",
+      "detail": "approved by user",
+      "kind": "approval.resolved"
+    },
+    {
+      "agent": "agt#1",
+      "at": "2026-02-01T10:00:13Z",
+      "detail": "reader (worker)",
+      "kind": "agent.created"
+    },
+    {
+      "at": "2026-02-01T10:00:14Z",
+      "detail": "read the manifest",
+      "kind": "task.created"
+    },
+    {
+      "at": "2026-02-01T10:00:21Z",
+      "detail": "manifest missing; reported",
+      "kind": "task.completed"
+    },
+    {
+      "agent": "agt#1",
+      "at": "2026-02-01T10:00:22Z",
+      "detail": "reported the missing manifest",
+      "kind": "agent.completed"
+    },
+    {
+      "at": "2026-02-01T10:00:25Z",
+      "detail": "repository summarized",
+      "kind": "task.completed"
+    },
+    {
+      "agent": "agt#0",
+      "at": "2026-02-01T10:00:26Z",
+      "detail": "done",
+      "kind": "agent.completed"
+    }
+  ],
+  "tools": [
+    {
+      "cancelled": 0,
+      "denied": 0,
+      "duration_ms": 35,
+      "failed": 0,
+      "replayed": 0,
+      "requested": 1,
+      "retries": 0,
+      "succeeded": 1,
+      "tool": "bash"
+    },
+    {
+      "cancelled": 0,
+      "denied": 0,
+      "duration_ms": 0,
+      "failed": 1,
+      "replayed": 0,
+      "requested": 1,
+      "retries": 0,
+      "succeeded": 0,
+      "tool": "read_file"
+    }
+  ],
+  "usage": {
+    "cache_read_tokens": 0,
+    "cache_write_tokens": 0,
+    "cost_usd": 0.036000000000000004,
+    "cost_complete": true,
+    "cost_basis": "unknown",
+    "input_tokens": 2500,
+    "output_tokens": 120
+  }
+}

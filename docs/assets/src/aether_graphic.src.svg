@@ -1,0 +1,388 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1068" viewBox="0 0 1600 1068" role="img" aria-labelledby="aether-title aether-desc">
+  <title id="aether-title">Aether: local agents, lasting work</title>
+  <desc id="aether-desc">Illustrated overview of the local aetherd daemon, which owns agents, tasks and state. Messages, timers, recurring schedules, signed webhooks and authorized GitHub requests trigger work. Native Claude Code and Codex keep their own loops and tools; Aether also runs an API loop for hosted Anthropic, OpenAI, xAI (Grok), Google (Gemini), Groq and OpenRouter APIs with keys; local Ollama, LM Studio, vLLM and llama.cpp servers; and any OpenAI-compatible endpoint. Grok and Gemini consumer subscriptions are not supported sign-in routes. Tasks, conversations, memory, artifacts, run history, schedules and approvals persist, with recovery support. Built-in tools, MCP servers, shell and Python, TypeScript and Rust clients connect your work. Four mascot scenes show one agent, mixed providers and models in one run, delegation trees with model and effort per agent and optional separate Git worktrees, and event-driven work.</desc>
+  <style id="source-fonts">
+    @font-face { font-family: "Fira Sans"; font-weight: 400; src: url("fonts/FiraSans-Regular.ttf"); }
+    @font-face { font-family: "Fira Sans"; font-weight: 500; src: url("fonts/FiraSans-Medium.ttf"); }
+    @font-face { font-family: "Fira Sans"; font-weight: 600; src: url("fonts/FiraSans-SemiBold.ttf"); }
+    @font-face { font-family: "Fira Sans"; font-weight: 700; src: url("fonts/FiraSans-Bold.ttf"); }
+    @font-face { font-family: "Fira Sans"; font-weight: 900; src: url("fonts/FiraSans-Black.ttf"); }
+    @font-face { font-family: "Fira Mono"; font-weight: 400; src: url("fonts/FiraMono-Regular.ttf"); }
+    @font-face { font-family: "Fira Mono"; font-weight: 500; src: url("fonts/FiraMono-Medium.ttf"); }
+    @font-face { font-family: "Caveat"; src: url("fonts/Caveat[wght].ttf"); }
+    .sans { font-family: "Fira Sans"; font-weight: 400; } .sans-md { font-family: "Fira Sans"; font-weight: 500; }
+    .sans-sb { font-family: "Fira Sans"; font-weight: 600; } .sans-b { font-family: "Fira Sans"; font-weight: 700; }
+    .sans-black { font-family: "Fira Sans"; font-weight: 900; } .mono { font-family: "Fira Mono"; font-weight: 400; }
+    .mono-md { font-family: "Fira Mono"; font-weight: 500; } .hand { font-family: "Caveat"; }
+  </style>
+  <defs>
+    <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse">
+      <circle cx="11" cy="11" r="0.9" fill="#dbe3ee"/>
+    </pattern>
+    <marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+      <path d="M1.5,1.5 L8.5,5 L1.5,8.5" fill="none" stroke="#50658a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <marker id="ah-ink" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="11" markerHeight="11" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+      <path d="M1.5,1.5 L8.5,5 L1.5,8.5" fill="none" stroke="#1b2536" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+
+    <!-- The mascot, in grid units: 14 wide, 10 tall, head top at y=0. -->
+    <g id="bot">
+      <path d="M2,0 H12 V3 H14 V6 H12 V10 H10 V8 H8 V10 H6 V8 H4 V10 H2 V6 H0 V3 H2 Z" fill="#3f8cf2" stroke="#16233a" stroke-width="0.55" stroke-linejoin="round"/>
+      <rect x="2.3" y="6.5" width="9.4" height="1.2" fill="#2f74d8"/>
+      <rect x="2.9" y="0.9" width="1.3" height="1.3" fill="#a9d0ff"/>
+      <rect x="4.2" y="3" width="1.6" height="2.1" fill="#16233a"/>
+      <rect x="8.2" y="3" width="1.6" height="2.1" fill="#16233a"/>
+    </g>
+    <g id="laurel-half">
+      <path d="M1.2,2.6 A5.6,5.6 0 0 1 6.4,-2.2" fill="none" stroke="#b98314" stroke-width="0.45" stroke-linecap="round"/>
+      <g fill="#f0c04e" stroke="#16233a" stroke-width="0.28" stroke-linejoin="round">
+        <path d="M0,0 Q1.25,-0.8 2.5,0 Q1.25,0.8 0,0 Z" transform="translate(1.62 1.86) rotate(256)"/>
+        <path d="M0,0 Q1.25,-0.8 2.5,0 Q1.25,0.8 0,0 Z" transform="translate(2.25 0.43) rotate(327)"/>
+        <path d="M0,0 Q1.25,-0.8 2.5,0 Q1.25,0.8 0,0 Z" transform="translate(3.25 -0.76) rotate(290)"/>
+        <path d="M0,0 Q1.25,-0.8 2.5,0 Q1.25,0.8 0,0 Z" transform="translate(4.55 -1.63) rotate(358)"/>
+        <path d="M0,0 Q1.25,-0.8 2.5,0 Q1.25,0.8 0,0 Z" transform="translate(5.84 -2.08) rotate(320)"/>
+      </g>
+    </g>
+    <g id="acc-laurel">
+      <use href="#laurel-half"/>
+      <use href="#laurel-half" transform="translate(14 0) scale(-1 1)"/>
+    </g>
+    <g id="acc-baton">
+      <path d="M13.4,4.6 L17.8,-1.4" stroke="#16233a" stroke-width="0.95" stroke-linecap="round"/>
+      <path d="M13.4,4.6 L17.8,-1.4" stroke="#fff8e6" stroke-width="0.45" stroke-linecap="round"/>
+      <ellipse cx="13.6" cy="4.3" rx="0.75" ry="0.6" fill="#e7b43c" stroke="#16233a" stroke-width="0.35"/>
+      <path d="M17.9,-2.5 V-3.5 M18.8,-2.2 L19.6,-2.9 M19,-1.3 H20" fill="none" stroke="#b98314" stroke-width="0.4" stroke-linecap="round"/>
+    </g>
+    <g id="acc-hardhat" stroke="#16233a" stroke-linejoin="round">
+      <path d="M3.3,0.4 C3.3,-3.4 10.7,-3.4 10.7,0.4 Z" fill="#f6c445" stroke-width="0.5"/>
+      <rect x="1.8" y="-0.2" width="10.4" height="1.1" rx="0.5" fill="#f6c445" stroke-width="0.5"/>
+      <path d="M7,-2.4 V-0.2" stroke-width="0.4"/>
+    </g>
+    <g id="acc-review" stroke="#16233a" stroke-linecap="round">
+      <path d="M3.2,0.3 C3.2,-2.6 10.8,-2.6 10.8,0.3 Z" fill="#2c3f5e" stroke-width="0.5"/>
+      <path d="M9.8,0.15 H13.2" stroke-width="0.9"/>
+      <path d="M13.6,4.9 L14.9,3.6" stroke-width="0.9"/>
+      <circle cx="16" cy="2.5" r="1.5" fill="#dff1ff" stroke-width="0.5"/>
+    </g>
+    <g id="acc-test" stroke="#16233a" stroke-linejoin="round">
+      <path d="M14.4,0.7 H15.6 V2.6 L17,5.7 H13 L14.4,2.6 Z" fill="#effcf5" stroke-width="0.45"/>
+      <path d="M13.55,4.5 H16.45 L17,5.7 H13 Z" fill="#54d18f" stroke="none"/>
+      <path d="M14.4,0.7 H15.6 V2.6 L17,5.7 H13 L14.4,2.6 Z" fill="none" stroke-width="0.45"/>
+      <path d="M2,0.2 H12" stroke-width="0.5"/>
+      <circle cx="5" cy="0.2" r="1.05" fill="#c9ecff" stroke-width="0.4"/>
+      <circle cx="9" cy="0.2" r="1.05" fill="#c9ecff" stroke-width="0.4"/>
+    </g>
+    <g id="acc-ship" stroke="#16233a" stroke-linejoin="round">
+      <path d="M1.8,-2.3 Q7,-3.9 12.2,-2.3 L11,0.2 H3 Z" fill="#ffffff" stroke-width="0.5"/>
+      <rect x="2.6" y="-0.9" width="8.8" height="1.3" fill="#1f2d47" stroke-width="0.4"/>
+      <circle cx="7" cy="-1.9" r="0.6" fill="#e7b43c" stroke-width="0.3"/>
+    </g>
+    <g id="acc-doc" stroke="#16233a">
+      <rect x="13.6" y="1.2" width="3.6" height="4.6" rx="0.4" fill="#ffffff" stroke-width="0.45"/>
+      <path d="M14.4,2.5 H16.4 M14.4,3.5 H16.4 M14.4,4.5 H15.6" stroke="#8193b0" stroke-width="0.35"/>
+    </g>
+    <g id="acc-ask">
+      <path d="M12.2,-5.6 H18.4 Q19.2,-5.6 19.2,-4.8 V-2.4 Q19.2,-1.6 18.4,-1.6 H14.6 L13.2,-0.4 L13.5,-1.6 H12.2 Q11.4,-1.6 11.4,-2.4 V-4.8 Q11.4,-5.6 12.2,-5.6 Z" fill="#ffffff" stroke="#16233a" stroke-width="0.45" stroke-linejoin="round"/>
+      <circle cx="13.5" cy="-3.6" r="0.45" fill="#16233a"/>
+      <circle cx="15.3" cy="-3.6" r="0.45" fill="#16233a"/>
+      <circle cx="17.1" cy="-3.6" r="0.45" fill="#16233a"/>
+    </g>
+    <g id="acc-wizard" stroke="#16233a" stroke-linejoin="round">
+      <path d="M2.8,0.4 L6.3,-6.2 Q7.1,-7.5 7.9,-6.1 L11.2,0.4 Z" fill="#4c43b8" stroke-width="0.5"/>
+      <ellipse cx="7" cy="0.4" rx="5.4" ry="0.9" fill="#4c43b8" stroke-width="0.5"/>
+      <path d="M6.1,-4.9 L6.35,-4.15 L7.15,-4.15 L6.5,-3.7 L6.75,-2.95 L6.1,-3.4 L5.45,-2.95 L5.7,-3.7 L5.05,-4.15 H5.85 Z" fill="#f6c445" stroke="none"/>
+      <path d="M8.8,-2.6 L9,-2 L9.65,-2 L9.12,-1.6 L9.32,-1 L8.8,-1.38 L8.28,-1 L8.48,-1.6 L7.95,-2 H8.6 Z" fill="#f6c445" stroke="none"/>
+    </g>
+    <g id="acc-staff" stroke="#16233a" stroke-linejoin="round">
+      <path d="M-0.8,1 L1.5,10" stroke-width="0.8" stroke-linecap="round"/>
+      <path d="M-0.8,1 L1.5,10" stroke="#d69b3b" stroke-width="0.35" stroke-linecap="round"/>
+      <circle cx="-1" cy="0.6" r="1.25" fill="#f6c445" stroke-width="0.4"/>
+      <path d="M-1.6,0.5 Q-1.6,-0.1 -1,0" fill="none" stroke="#fff5ce" stroke-width="0.35" stroke-linecap="round"/>
+    </g>
+    <g id="acc-cap" stroke="#16233a" stroke-linejoin="round">
+      <path d="M2.5,0 C2.5,-5.5 11.4,-5.5 11.4,0 Z" fill="#f05b52" stroke-width="0.5"/>
+      <path d="M5,0 C4.5,-4 8,-5 10.5,-2.5 L11.4,0 Z" fill="#ffffff" stroke-width="0.45"/>
+      <path d="M2.5,0 Q8,-1.6 13,-1 Q14.6,-0.3 12,0.6 L10,0.2 H2.5 Z" fill="#d84447" stroke-width="0.5"/>
+      <path d="M6.5,-4.1 Q7,-4.8 7.7,-4.1" fill="#f05b52" stroke-width="0.4"/>
+    </g>
+    <g id="acc-crown" stroke="#16233a" stroke-linejoin="round">
+      <path d="M3,0 L2.6,-3.2 L5.1,-1.9 L7,-4 L8.9,-1.9 L11.4,-3.2 L11,0 Z" fill="#f6c445" stroke-width="0.5"/>
+      <path d="M3.4,-0.8 H10.6" stroke="#cf9630" stroke-width="0.35"/>
+    </g>
+    <g id="acc-headphones" stroke="#16233a" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M1.5,4 V0.5 C1.5,-4 12.5,-4 12.5,0.5 V4" fill="none" stroke-width="1.2"/>
+      <path d="M1.5,1 V0.5 C1.5,-3.1 12.5,-3.1 12.5,0.5 V1" fill="none" stroke="#a7b4c9" stroke-width="0.5"/>
+      <rect x="0.8" y="2" width="1.8" height="3.5" rx="0.6" fill="#2c3f5e" stroke-width="0.45"/>
+      <rect x="11.4" y="2" width="1.8" height="3.5" rx="0.6" fill="#2c3f5e" stroke-width="0.45"/>
+      <path d="M12,5 Q12,7 9,7" fill="none" stroke-width="0.45"/>
+    </g>
+    <g id="acc-wrench" stroke="#16233a" stroke-linejoin="round">
+      <path d="M0.5,7 L-1,2.1 C-3,2 -3.4,0 -2.2,-1.2 L-1.7,0.3 L-0.4,-0.1 L-0.8,-1.6 C1.2,-1 1.4,0.8 0,1.7 L1.7,6.5 Z" fill="#a9bbd1" stroke-width="0.45"/>
+    </g>
+    <g id="acc-ranger" stroke="#16233a" stroke-linejoin="round">
+      <path d="M3,0 L4.2,-3.2 Q5,-4.4 6.7,-2.9 Q8.4,-4.5 10,-2.8 L11,0 Z" fill="#72965b" stroke-width="0.5"/>
+      <path d="M1,0.3 Q7,-1.5 12.8,-0.9 Q14.2,0 12,0.9 Q7,0.1 2,1 Z" fill="#83a668" stroke-width="0.5"/>
+      <path d="M5,-2.6 L5.2,-0.4" stroke="#bad69c" stroke-width="0.4"/>
+    </g>
+    <!-- Neutral 24-unit line icons; all provider names are plain text. -->
+    <g id="icon-message" fill="none" stroke="#2c3e5c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3,3 H21 V17 H10 L5,21 V17 H3 Z M7,8 H17 M7,12 H14"/>
+    </g>
+    <g id="icon-clock" fill="none" stroke="#2c3e5c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="9"/><path d="M12,6 V12 L17,15"/>
+    </g>
+    <g id="icon-calendar" fill="none" stroke="#2c3e5c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7,3 V7 M17,3 V7 M3,10 H21 M8,14 H11 M14,14 H17 M8,17 H11"/>
+    </g>
+    <g id="icon-hook" fill="none" stroke="#2c3e5c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="4" r="2.5"/><circle cx="4" cy="18" r="2.5"/><circle cx="20" cy="18" r="2.5"/><path d="M10.8,6.2 L5.2,15.8 M13.2,6.2 L18.8,15.8 M6.5,18 H17.5"/>
+    </g>
+    <g id="icon-request" fill="none" stroke="#2c3e5c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M5,2 H14 L20,8 V22 H5 Z M14,2 V8 H20 M9,13 H16 M9,17 H14"/>
+    </g>
+    <g id="icon-terminal" fill="none" stroke="#2c3e5c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="2" y="3" width="20" height="18" rx="2"/><path d="M6,8 L10,12 L6,16 M13,16 H18"/>
+    </g>
+    <g id="icon-cube" fill="none" stroke="#2c3e5c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12,2 L22,7 V17 L12,22 L2,17 V7 Z M2,7 L12,12 L22,7 M12,12 V22"/>
+    </g>
+    <g id="icon-code" fill="none" stroke="#2c3e5c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M7,5 L1,12 L7,19 M17,5 L23,12 L17,19 M14,3 L10,21"/>
+    </g>
+    <g id="icon-db" fill="none" stroke="#2c3e5c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="12" cy="5" rx="9" ry="3.5"/><path d="M3,5 V19 C3,24 21,24 21,19 V5 M3,12 C3,17 21,17 21,12"/>
+    </g>
+    <g id="icon-check" fill="none" stroke="#2c3e5c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7,12 L10.5,16 L17,8"/>
+    </g>
+    <g id="icon-recover" fill="none" stroke="#2c3e5c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M20,10 A8.5,8.5 0 1 1 16,4 M16,1 V6 H11"/>
+    </g>
+    <g id="icon-shield" fill="none" stroke="#2c3e5c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12,2 L21,5 V12 Q21,19 12,23 Q3,19 3,12 V5 Z"/>
+    </g>
+  </defs>
+
+  <rect width="1600" height="1068" fill="#f7f9fc"/>
+  <rect width="1600" height="1068" fill="url(#dots)" opacity="0.7"/>
+
+  <!-- Title, event sources and the handwritten promise. -->
+  <text x="30" y="78" class="sans-black" font-size="76" letter-spacing="22" fill="#111a27">AETHER</text>
+  <text x="33" y="106" class="sans-md" font-size="14" letter-spacing="4" fill="#3a4d6b">LOCAL AGENTS. LASTING WORK.</text>
+  <text x="32" y="143" class="sans" font-size="18" fill="#3a4d6b">A local daemon for persistent, event-driven agents.</text>
+  <text x="32" y="166" class="sans" font-size="18" fill="#3a4d6b">Run agents, coordinate tasks, keep context.</text>
+  <text x="32" y="189" class="sans" font-size="18" fill="#3a4d6b">Supervise your work from a terminal or an app.</text>
+
+  <g transform="translate(550 102)">
+    <rect width="525" height="126" rx="9" fill="#f2f8ff" stroke="#b9d6fb"/>
+    <text x="262.5" y="24" text-anchor="middle" class="sans-b" font-size="18" fill="#121c2b">Events <tspan class="sans">that trigger work</tspan></text>
+    <use href="#icon-message" transform="translate(41 44) scale(1.25)"/>
+    <use href="#icon-clock" transform="translate(141 44) scale(1.25)"/>
+    <use href="#icon-calendar" transform="translate(241 44) scale(1.25)"/>
+    <use href="#icon-hook" transform="translate(341 44) scale(1.25)"/>
+    <use href="#icon-request" transform="translate(451 44) scale(1.25)"/>
+    <text x="56" y="96" text-anchor="middle" class="sans" font-size="14" fill="#3a4d6b">Messages</text>
+    <text x="156" y="96" text-anchor="middle" class="sans" font-size="14" fill="#3a4d6b">Timers</text>
+    <text x="256" y="96" text-anchor="middle" class="sans" font-size="14" fill="#3a4d6b">Recurring</text>
+    <text x="256" y="113" text-anchor="middle" class="sans" font-size="14" fill="#3a4d6b">schedules</text>
+    <text x="356" y="96" text-anchor="middle" class="sans" font-size="14" fill="#3a4d6b">Signed</text>
+    <text x="356" y="113" text-anchor="middle" class="sans" font-size="14" fill="#3a4d6b">webhooks</text>
+    <text x="466" y="96" text-anchor="middle" class="sans" font-size="14" fill="#3a4d6b">Authorized</text>
+    <text x="466" y="113" text-anchor="middle" class="sans" font-size="14" fill="#3a4d6b">GitHub requests</text>
+  </g>
+  <g transform="rotate(-8 1440 98)">
+    <text x="1380" y="55" class="hand" font-size="35" fill="#16202e">Your models.</text>
+    <text x="1368" y="94" class="hand" font-size="35" fill="#16202e">Your topology.</text>
+    <text x="1388" y="133" class="hand" font-size="35" fill="#16202e">Your events.</text>
+    <path d="M1384,157 Q1445,148 1546,149" fill="none" stroke="#16202e" stroke-width="3.5" stroke-linecap="round"/>
+  </g>
+
+  <!-- Connectors sit behind the illustrated scenes. -->
+  <g fill="none" stroke="#50658a" stroke-width="1.4" marker-end="url(#ah)">
+    <path d="M606,228 C606,278 636,242 636,330 V400"/>
+    <path d="M706,228 C706,277 684,247 684,330 V400"/>
+    <path d="M806,228 C806,252 882,252 882,307 V400"/>
+    <path d="M906,228 C906,280 919,281 919,330 V400"/>
+    <path d="M1016,228 C1016,251 1108,238 1108,282 V377 Q1108,392 1074,392 V400"/>
+    <path d="M292,314 C352,314 280,432 367,432 H442"/>
+    <path d="M292,535 C350,535 280,461 367,461 H442"/>
+    <path d="M1092,431 H1113" marker-start="url(#ah)"/>
+    <path d="M1092,460 H1113" marker-start="url(#ah)"/>
+    <path d="M1360,335 C1313,335 1351,420 1318,420"/>
+    <path d="M1318,468 C1351,468 1313,518 1360,518"/>
+  </g>
+
+  <g transform="translate(32 228)">
+    <rect width="260" height="372" rx="9" fill="#f2f8ff" stroke="#b9d6fb"/>
+    <text x="14" y="30" class="sans-b" font-size="18" fill="#121c2b">Your models. Together.</text>
+    <text x="16" y="62" class="mono-md" font-size="12" letter-spacing="1.5" fill="#3a4d6b">SUBSCRIPTION CLIs</text>
+    <text x="18" y="88" class="sans-md" font-size="18" fill="#3a4d6b">Claude Code · Codex</text>
+    <text x="18" y="111" class="sans" font-size="15" fill="#3a4d6b">Their own loops and tools.</text>
+    <path d="M16,128 H244" stroke="#d4dfed"/>
+    <text x="16" y="151" class="mono-md" font-size="12" letter-spacing="1.5" fill="#3a4d6b">APIs · WITH A KEY</text>
+    <text x="18" y="177" class="sans-md" font-size="16" fill="#3a4d6b">Anthropic · OpenAI · xAI</text>
+    <text x="18" y="200" class="sans-md" font-size="16" fill="#3a4d6b">Google · Groq · OpenRouter</text>
+    <path d="M16,220 H244" stroke="#d4dfed"/>
+    <text x="16" y="244" class="mono-md" font-size="12" letter-spacing="1.5" fill="#3a4d6b">LOCAL SERVERS</text>
+    <text x="18" y="269" class="sans" font-size="15" fill="#3a4d6b">Ollama · LM Studio</text>
+    <text x="18" y="292" class="sans" font-size="15" fill="#3a4d6b">vLLM · llama.cpp</text>
+    <text x="18" y="324" class="sans" font-size="15" fill="#3a4d6b">Any OpenAI-compatible</text>
+    <text x="18" y="346" class="sans" font-size="15" fill="#3a4d6b">endpoint via providers.toml.</text>
+  </g>
+  <g transform="rotate(-7 373 313)">
+    <text x="332" y="305" class="hand" font-size="27" fill="#16202e">Models are</text>
+    <text x="327" y="331" class="hand" font-size="27" fill="#16202e">just participants.</text>
+    <path d="M345,345 Q343,368 316,380" fill="none" stroke="#50658a" stroke-width="1.4" marker-end="url(#ah)"/>
+  </g>
+  <g transform="rotate(-8 994 317)">
+    <text x="955" y="298" class="hand" font-size="27" fill="#16202e">Work starts</text>
+    <text x="968" y="325" class="hand" font-size="27" fill="#16202e">with an event.</text>
+    <path d="M995,345 Q1021,333 1048,335" fill="none" stroke="#16202e" stroke-width="2.5" stroke-linecap="round"/>
+  </g>
+
+  <g transform="translate(716 305) scale(10)">
+    <use href="#bot"/><use href="#acc-wizard"/><use href="#acc-staff"/>
+  </g>
+  <rect x="450" y="408" width="635" height="145" rx="10" fill="#1c2636"/>
+  <path d="M462,410 H1073" stroke="#34445e" stroke-width="2"/>
+  <text x="767.5" y="456" text-anchor="middle" class="sans-sb" font-size="31" letter-spacing="3.4" fill="#f4f7fb">AETHER LOCAL DAEMON</text>
+  <text x="767.5" y="491" text-anchor="middle" class="mono" font-size="14" letter-spacing="0.8" fill="#c9d6ea">aetherd · owns agents, tasks and state</text>
+  <text x="767.5" y="527" text-anchor="middle" class="mono" font-size="12" letter-spacing="1.5" fill="#a9c7e8">EVENT-DRIVEN · PERSISTENT · EXTENSIBLE</text>
+
+  <g transform="translate(1120 230)">
+    <rect width="190" height="346" rx="9" fill="#f2f8ff" stroke="#b9d6fb"/>
+    <text x="13" y="29" class="sans-b" font-size="17" fill="#121c2b">Persistent by design.</text>
+    <use href="#icon-db" transform="translate(70 54) scale(2)"/>
+    <use href="#icon-check" transform="translate(19 119) scale(0.65)"/>
+    <use href="#icon-message" transform="translate(19 146) scale(0.65)"/>
+    <use href="#icon-cube" transform="translate(19 173) scale(0.65)"/>
+    <use href="#icon-request" transform="translate(19 200) scale(0.65)"/>
+    <use href="#icon-clock" transform="translate(19 227) scale(0.65)"/>
+    <use href="#icon-calendar" transform="translate(19 254) scale(0.65)"/>
+    <use href="#icon-shield" transform="translate(19 281) scale(0.65)"/>
+    <use href="#icon-recover" transform="translate(19 308) scale(0.65)"/>
+    <text x="47" y="132" class="sans" font-size="14.5" fill="#3a4d6b">Tasks</text>
+    <text x="47" y="159" class="sans" font-size="14.5" fill="#3a4d6b">Conversations</text>
+    <text x="47" y="186" class="sans" font-size="14.5" fill="#3a4d6b">Memory</text>
+    <text x="47" y="213" class="sans" font-size="14.5" fill="#3a4d6b">Artifacts</text>
+    <text x="47" y="240" class="sans" font-size="14.5" fill="#3a4d6b">Run history</text>
+    <text x="47" y="267" class="sans" font-size="14.5" fill="#3a4d6b">Schedules</text>
+    <text x="47" y="294" class="sans" font-size="14.5" fill="#3a4d6b">Approvals</text>
+    <text x="47" y="321" class="sans" font-size="14.5" fill="#3a4d6b">Recovery</text>
+  </g>
+  <g transform="translate(1360 230)">
+    <rect width="208" height="360" rx="9" fill="#f2f8ff" stroke="#b9d6fb"/>
+    <text x="14" y="29" class="sans-b" font-size="17" fill="#121c2b">Tools &amp; integrations.</text>
+    <use href="#icon-cube" transform="translate(20 58)"/>
+    <text x="61" y="77" class="sans" font-size="16" fill="#3a4d6b">Built-in tools</text>
+    <use href="#icon-code" transform="translate(20 100)"/>
+    <text x="61" y="119" class="sans" font-size="16" fill="#3a4d6b">MCP servers</text>
+    <use href="#icon-terminal" transform="translate(20 142)"/>
+    <text x="61" y="161" class="sans" font-size="16" fill="#3a4d6b">Shell</text>
+    <path d="M16,185 H192" stroke="#d4dfed"/>
+    <text x="20" y="212" class="mono-md" font-size="12" letter-spacing="1.5" fill="#3a4d6b">DAEMON CLIENTS</text>
+    <use href="#icon-code" transform="translate(20 233) scale(0.8)"/>
+    <text x="61" y="249" class="sans" font-size="16" fill="#3a4d6b">Python</text>
+    <use href="#icon-code" transform="translate(20 271) scale(0.8)"/>
+    <text x="61" y="287" class="sans" font-size="16" fill="#3a4d6b">TypeScript</text>
+    <use href="#icon-code" transform="translate(20 309) scale(0.8)"/>
+    <text x="61" y="325" class="sans" font-size="16" fill="#3a4d6b">Rust</text>
+  </g>
+  <g transform="rotate(-6 1210 609)">
+    <text x="1145" y="603" class="hand" font-size="26" fill="#16202e">Agents persist.</text>
+    <text x="1154" y="628" class="hand" font-size="26" fill="#16202e">Your work continues.</text>
+    <path d="M1135,600 Q1125,595 1131,582" fill="none" stroke="#50658a" stroke-width="1.4" marker-end="url(#ah)"/>
+  </g>
+  <g transform="rotate(-8 1460 619)">
+    <text x="1409" y="622" class="hand" font-size="24" fill="#16202e">Plug in your world.</text>
+    <path d="M1402,621 Q1381,610 1393,595" fill="none" stroke="#50658a" stroke-width="1.4" marker-end="url(#ah)"/>
+  </g>
+
+  <!-- Four ways to work, following the original illustrated layout. -->
+  <path d="M767.5,553 V581" stroke="#50658a" stroke-width="1.4"/>
+  <text x="767.5" y="607" text-anchor="middle" class="mono" font-size="18" fill="#2d62c8">You decide the topology.</text>
+  <g fill="none" stroke="#50658a" stroke-width="1.4" marker-end="url(#ah)">
+    <path d="M767.5,621 Q767.5,640 748,640 H211 Q195,640 195,656"/>
+    <path d="M767.5,621 Q767.5,640 787,640 H1341 Q1357,640 1357,656"/>
+    <path d="M561,640 V656"/>
+    <path d="M951,640 V656"/>
+  </g>
+
+  <g transform="translate(32 665)">
+    <rect width="326" height="285" rx="9" fill="#f2f8ff" stroke="#b9d6fb"/>
+    <text x="16" y="29" class="sans-b" font-size="18" fill="#121c2b">1. Just one agent.</text>
+    <text x="42" y="53" class="sans" font-size="16" fill="#3a4d6b">Sometimes simplicity is enough.</text>
+    <g transform="translate(107 132) scale(8)"><use href="#bot"/><use href="#acc-cap"/></g>
+    <text x="163" y="263" text-anchor="middle" class="sans" font-size="17" fill="#3a4d6b">One agent. Still Aether.</text>
+  </g>
+  <g transform="translate(366 665)">
+    <rect width="390" height="285" rx="9" fill="#f2f8ff" stroke="#b9d6fb"/>
+    <text x="16" y="29" class="sans-b" font-size="18" fill="#121c2b">2. Mix providers and models.</text>
+    <text x="42" y="53" class="sans" font-size="16" fill="#3a4d6b">Choose a model for each task.</text>
+    <g transform="translate(24 132) scale(4.8)"><use href="#bot"/><use href="#acc-crown"/></g>
+    <g transform="translate(157 132) scale(4.8)"><use href="#bot"/><use href="#acc-hardhat"/></g>
+    <g transform="translate(290 132) scale(4.8)"><use href="#bot"/><use href="#acc-wizard"/></g>
+    <path d="M101,154 H144" fill="none" stroke="#50658a" stroke-width="1.4" marker-end="url(#ah)"/>
+    <path d="M234,154 H277" fill="none" stroke="#50658a" stroke-width="1.4" marker-end="url(#ah)"/>
+    <text x="58" y="211" text-anchor="middle" class="sans-sb" font-size="16" fill="#121c2b">Claude Code</text>
+    <text x="191" y="211" text-anchor="middle" class="sans-sb" font-size="16" fill="#121c2b">Codex</text>
+    <text x="324" y="211" text-anchor="middle" class="sans-sb" font-size="16" fill="#121c2b">Local API</text>
+    <text x="58" y="233" text-anchor="middle" class="sans" font-size="14.5" fill="#3a4d6b">Claude</text>
+    <text x="191" y="233" text-anchor="middle" class="sans" font-size="14.5" fill="#3a4d6b">OpenAI</text>
+    <text x="324" y="233" text-anchor="middle" class="sans" font-size="14.5" fill="#3a4d6b">e.g. Ollama</text>
+    <text x="195" y="263" text-anchor="middle" class="sans" font-size="17" fill="#3a4d6b">Different providers. One run.</text>
+  </g>
+  <g transform="translate(764 665)">
+    <rect width="374" height="285" rx="9" fill="#f2f8ff" stroke="#b9d6fb"/>
+    <text x="16" y="29" class="sans-b" font-size="18" fill="#121c2b">3. Delegate through a tree.</text>
+    <text x="42" y="53" class="sans" font-size="16" fill="#3a4d6b">Model and effort per agent.</text>
+    <g transform="translate(0 -12)">
+      <g fill="none" stroke="#50658a" stroke-width="1.25" marker-end="url(#ah)">
+        <path d="M150,105 H87 Q66,105 66,125 V136"/>
+        <path d="M185,125 V136"/>
+        <path d="M221,105 H271 Q295,105 295,125 V136"/>
+        <path d="M141,163 H127 Q119,163 119,177 V198"/>
+        <path d="M211,186 V193 Q211,201 230,201 H241 Q249,201 249,209"/>
+      </g>
+      <g transform="translate(161 88) scale(3.5)"><use href="#bot"/><use href="#acc-crown"/></g>
+      <g transform="translate(47 151) scale(3.5)"><use href="#bot"/><use href="#acc-hardhat"/></g>
+      <g transform="translate(161 151) scale(3.5)"><use href="#bot"/><use href="#acc-headphones"/></g>
+      <g transform="translate(275 151) scale(3.5)"><use href="#bot"/><use href="#acc-review"/></g>
+      <g transform="translate(96 217) scale(3.5)"><use href="#bot"/><use href="#acc-cap"/></g>
+      <g transform="translate(229 217) scale(3.5)"><use href="#bot"/><use href="#acc-wrench"/></g>
+    </g>
+    <text x="187" y="277" text-anchor="middle" class="sans" font-size="16" fill="#3a4d6b">Optional separate Git worktrees.</text>
+  </g>
+  <g transform="translate(1146 665)">
+    <rect width="422" height="285" rx="9" fill="#f2f8ff" stroke="#b9d6fb"/>
+    <text x="16" y="29" class="sans-b" font-size="18" fill="#121c2b">4. Event-driven work.</text>
+    <text x="42" y="53" class="sans" font-size="16" fill="#3a4d6b">Agents that wake when work arrives.</text>
+    <use href="#icon-message" transform="translate(27 91) scale(1.1)"/>
+    <use href="#icon-clock" transform="translate(27 137) scale(1.1)"/>
+    <use href="#icon-hook" transform="translate(27 183) scale(1.1)"/>
+    <g fill="none" stroke="#50658a" stroke-width="1.25" marker-end="url(#ah)">
+      <path d="M64,104 C89,104 85,131 105,142"/>
+      <path d="M64,150 Q89,150 105,159"/>
+      <path d="M64,196 C88,196 83,180 105,177"/>
+      <path d="M199,170 H232"/>
+    </g>
+    <g transform="translate(112 151) scale(5.5)"><use href="#bot"/><use href="#acc-ranger"/></g>
+    <rect x="242" y="81" width="164" height="149" rx="8" fill="#fbfdff" stroke="#b9d6fb"/>
+    <use href="#icon-check" transform="translate(254 99) scale(0.8)"/>
+    <use href="#icon-check" transform="translate(254 131) scale(0.8)"/>
+    <use href="#icon-check" transform="translate(254 163) scale(0.8)"/>
+    <text x="282" y="114" class="sans" font-size="14.5" fill="#3a4d6b">Review requests</text>
+    <text x="282" y="146" class="sans" font-size="14.5" fill="#3a4d6b">Run analyses</text>
+    <text x="282" y="178" class="sans" font-size="14.5" fill="#3a4d6b">Record results</text>
+    <text x="282" y="211" class="sans" font-size="14" fill="#3a4d6b">… and more</text>
+    <text x="211" y="263" text-anchor="middle" class="sans" font-size="17" fill="#3a4d6b">From events to actions.</text>
+  </g>
+
+  <rect x="32" y="976" width="560" height="63" rx="9" fill="#f2f8ff" stroke="#b9d6fb"/>
+  <rect x="46" y="985" width="152" height="45" rx="5" fill="#1c2636"/>
+  <text x="62" y="1014" class="mono" font-size="22" fill="#f4f7fb"><tspan fill="#a9d0ff">$</tspan> aether</text>
+  <text x="218" y="1014" class="sans" font-size="17" fill="#3a4d6b">Your terminal. Your agents. Your work.</text>
+  <text x="955" y="1024" class="mono" font-size="11" letter-spacing="2" fill="#50658a">OPEN · FLEXIBLE · BUILT FOR REAL WORK</text>
+  <path d="M1535,1042 Q1553,1033 1569,1036" fill="none" stroke="#16202e" stroke-width="1.6" stroke-linecap="round"/>
+</svg>

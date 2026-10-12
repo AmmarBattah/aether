@@ -1,0 +1,45 @@
+[package]
+name = "aether"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Provider-agnostic, event-driven agent harness with a chat-first TUI"
+
+[[bin]]
+name = "aether"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+aether-core = { workspace = true }
+aether-protocol = { workspace = true }
+aether-client = { workspace = true }
+aether-daemon = { workspace = true }
+aether-tui = { workspace = true }
+aether-model = { workspace = true }
+aether-engine = { workspace = true }
+aether-memory = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+fs4 = { workspace = true }
+nix = { workspace = true, features = ["socket"] }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+futures = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
+rusqlite = { workspace = true }
+aether-store = { workspace = true }
+serde = { workspace = true }
+rustix = { version = "1.1.4", features = ["fs", "process"] }
+reqwest = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+tempfile = { workspace = true }

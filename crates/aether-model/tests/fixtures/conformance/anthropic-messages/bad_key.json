@@ -1,0 +1,1 @@
+{"type":"error","error":{"type":"authentication_error","message":"Invalid bearer token: sk-ant-api03-NOTAREALKEYbutkeyshaped0123456789. Find your key at https://console.anthropic.com/settings/keys"}}

@@ -1,0 +1,24 @@
+[
+  {
+    "name": "haiku-first-turn",
+    "model": "claude-code/haiku",
+    "prompt": "Start three researchers to read README.md and report its main point.",
+    "first_turn_children": 3,
+    "tree": {
+      "count": 3,
+      "provider": "claude-code",
+      "model": "haiku"
+    }
+  },
+  {
+    "name": "luna-first-turn",
+    "model": "codex/gpt-6-luna",
+    "prompt": "Start three researchers to read README.md and report its main point.",
+    "first_turn_children": 3,
+    "tree": {
+      "count": 3,
+      "provider": "codex",
+      "model": "gpt-6-luna"
+    }
+  }
+]

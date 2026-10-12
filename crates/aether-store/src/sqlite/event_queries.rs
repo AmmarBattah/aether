@@ -1,0 +1,144 @@
+use super::*;
+
+pub(super) type Arguments = Vec<Box<dyn rusqlite::ToSql>>;
+
+impl SqliteStore {
+    pub(super) fn query_events(
+        &self,
+        after: Option<u64>,
+        before: Option<u64>,
+        limit: usize,
+        filter: &EventFilter,
+        ascending: bool,
+    ) -> Result<Vec<Event>> {
+        if limit == 0 || before == Some(0) || after.is_some_and(|seq| seq >= i64::MAX as u64) {
+            return Ok(Vec::new());
+        }
+        let mut args: Arguments = Vec::new();
+        let predicate = filter_predicate(filter, &mut args);
+        let filter_len = args.len();
+        let after = after.unwrap_or(0);
+        let sql = if !ascending && filter.agent.is_some() && !filter.exclude_children {
+            // Bound each indexed branch before merging; OR would sort all matching history.
+            let own = filter_predicate_with_agent(filter, &mut args, Some("agent_id"));
+            let child = filter_predicate_with_agent(filter, &mut args, Some("parent_agent_id"));
+            let own = page_sql(&own, after, before, limit, false, &mut args);
+            let child = page_sql(&child, after, before, limit, false, &mut args);
+            args.push(Box::new(i64::try_from(limit).unwrap_or(i64::MAX)));
+            format!(
+                "SELECT body FROM (SELECT * FROM ({own}) UNION SELECT * FROM ({child})) ORDER BY seq DESC LIMIT ?{}",
+                args.len()
+            )
+        } else {
+            page_sql(&predicate, after, before, limit, ascending, &mut args)
+        };
+        let mut conn = self.read_conn();
+        // Both reads must see the same history, even if another connection is
+        // pruning between statements. No write is performed by this transaction.
+        let tx = conn.transaction()?;
+        let refs: Vec<&dyn rusqlite::ToSql> = args.iter().map(|arg| arg.as_ref()).collect();
+        let events: Vec<Event> = Self::read_many(&tx, &sql, &refs)?;
+        let mut lower = after + 1;
+        let mut upper = before.map_or(i64::MAX as u64, |seq| (seq - 1).min(i64::MAX as u64));
+        if events.len() == limit
+            && let Some(last) = events.last()
+        {
+            if ascending {
+                upper = last.seq;
+            } else {
+                lower = last.seq;
+            }
+        }
+        args.truncate(filter_len);
+        args.push(Box::new(lower as i64));
+        args.push(Box::new(upper as i64));
+        let sql = format!(
+            "SELECT MIN(first_seq), MAX(last_seq) FROM expired_event_spans WHERE {predicate} AND last_seq >= ?{} AND first_seq <= ?{}",
+            filter_len + 1,
+            filter_len + 2
+        );
+        let refs: Vec<&dyn rusqlite::ToSql> = args.iter().map(|arg| arg.as_ref()).collect();
+        let expired: (Option<i64>, Option<i64>) =
+            tx.query_row(&sql, refs.as_slice(), |row| Ok((row.get(0)?, row.get(1)?)))?;
+        if let (Some(first_seq), Some(last_seq)) = expired {
+            return Err(StoreError::HistoryExpired {
+                first_seq: first_seq as u64,
+                last_seq: last_seq as u64,
+            });
+        }
+        tx.commit()?;
+        Ok(events)
+    }
+}
+
+/// One page of events matching `predicate`, newest or oldest first. Pushes
+/// its bounds after the filter's arguments.
+pub(super) fn page_sql(
+    predicate: &str,
+    after: u64,
+    before: Option<u64>,
+    limit: usize,
+    ascending: bool,
+    args: &mut Arguments,
+) -> String {
+    args.push(Box::new(after as i64));
+    let after_arg = args.len();
+    let upper = if let Some(before) = before.filter(|seq| *seq <= i64::MAX as u64) {
+        args.push(Box::new(before as i64));
+        format!(" AND seq < ?{}", args.len())
+    } else {
+        String::new()
+    };
+    args.push(Box::new(i64::try_from(limit).unwrap_or(i64::MAX)));
+    let order = if ascending { "ASC" } else { "DESC" };
+    format!(
+        "SELECT body, seq FROM events WHERE {predicate} AND seq > ?{after_arg}{upper} ORDER BY seq {order} LIMIT ?{}",
+        args.len()
+    )
+}
+
+/// Both event payloads and expiry spans use exactly the same filter semantics.
+pub(super) fn filter_predicate(filter: &EventFilter, args: &mut Arguments) -> String {
+    filter_predicate_with_agent(filter, args, None)
+}
+
+fn filter_predicate_with_agent(
+    filter: &EventFilter,
+    args: &mut Arguments,
+    agent_column: Option<&str>,
+) -> String {
+    let mut sql = String::from("1 = 1");
+    if let Some(agent) = filter.agent {
+        args.push(Box::new(agent.to_string()));
+        let n = args.len();
+        if let Some(column) = agent_column {
+            sql.push_str(&format!(" AND {column} = ?{n}"));
+        } else if filter.exclude_children {
+            sql.push_str(&format!(" AND agent_id = ?{n}"));
+        } else {
+            sql.push_str(&format!(" AND (agent_id = ?{n} OR parent_agent_id = ?{n})"));
+        }
+    }
+    for (column, value) in [
+        ("task_id", filter.task.map(|id| id.to_string())),
+        ("run", filter.run.map(|id| id.to_string())),
+    ] {
+        if let Some(value) = value {
+            args.push(Box::new(value));
+            sql.push_str(&format!(" AND {column} = ?{}", args.len()));
+        }
+    }
+    for (column, values) in [("family", &filter.families), ("type", &filter.types)] {
+        if !values.is_empty() {
+            let placeholders: Vec<_> = values
+                .iter()
+                .map(|value| {
+                    args.push(Box::new(value.clone()));
+                    format!("?{}", args.len())
+                })
+                .collect();
+            sql.push_str(&format!(" AND {column} IN ({})", placeholders.join(",")));
+        }
+    }
+    sql
+}

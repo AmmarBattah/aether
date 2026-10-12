@@ -1,0 +1,16 @@
+── unicode 80 compact
+• Running sleep 5 && echo done
+── unicode 80 detail
+• Running sleep 5 && echo done
+── unicode 120 compact
+• Running sleep 5 && echo done
+── unicode 120 detail
+• Running sleep 5 && echo done
+── ascii 80 compact
+* Running sleep 5 && echo done
+── ascii 80 detail
+* Running sleep 5 && echo done
+── ascii 120 compact
+* Running sleep 5 && echo done
+── ascii 120 detail
+* Running sleep 5 && echo done

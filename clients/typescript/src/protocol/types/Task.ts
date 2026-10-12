@@ -1,0 +1,33 @@
+// Generated from clients/protocol.schema.json by scripts/generate_clients.py.
+// Do not edit: change the Rust types and regenerate.
+
+import type {
+  Actor,
+  AgentId,
+  ArtifactId,
+  Priority,
+  RunId,
+  TaskId,
+  TaskStatus,
+  status,
+} from "../../protocol.ts";
+
+/**
+ * A durable task record.
+ */
+export interface Task {
+  "artifacts"?: Array<ArtifactId>;
+  "created_at": string;
+  "creator": Actor;
+  "dependencies"?: Array<TaskId>;
+  "finished_at"?: string | null;
+  "id": TaskId;
+  "objective": string;
+  "owner"?: AgentId | null;
+  "parent_task"?: TaskId | null;
+  "priority"?: Priority;
+  "run": RunId;
+  "started_at"?: string | null;
+  "status": TaskStatus;
+  "updated_at": string;
+}

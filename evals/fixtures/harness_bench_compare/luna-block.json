@@ -1,0 +1,422 @@
+{
+ "note": "Synthetic manifest for the report unit tests; not a measurement of any model.",
+ "pilot": false,
+ "jobs": 1,
+ "seed": 3,
+ "runs": 2,
+ "trials": [
+  {
+   "short_id": "l1",
+   "condition": "native-luna-low",
+   "case": "ledger",
+   "run": 1,
+   "trial_dir": "target/hb/l1",
+   "workflow_status": "completed",
+   "solve_seconds": 60.0,
+   "requested_treatment": {
+    "kind": "native-claude",
+    "model": "gpt-6-luna",
+    "effort": "low"
+   },
+   "resolved_metadata": [
+    {
+     "source": "native rollout turn_context",
+     "session_id": "t",
+     "model": "gpt-6-luna",
+     "effort": "low"
+    }
+   ],
+   "grade": {
+    "passed": 22,
+    "total": 22,
+    "errors": []
+   },
+   "success": true,
+   "status": "completed",
+   "usage_report": {
+    "usage": {
+     "uncached_input_tokens": 1000,
+     "output_tokens": 500,
+     "cache_read_tokens": 9000,
+     "cache_write_tokens": 0,
+     "total_tokens": 10500,
+     "api_equivalent_cost_usd": 0.01
+    },
+    "coverage": {
+     "uncached_input_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "output_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "cache_read_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "cache_write_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "total_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "api_equivalent_cost_usd": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "billed": 0,
+      "estimated": 1,
+      "unpriced": 0,
+      "complete": true
+     }
+    }
+   }
+  },
+  {
+   "short_id": "l2",
+   "condition": "aether-single-luna-low",
+   "case": "ledger",
+   "run": 1,
+   "trial_dir": "target/hb/l2",
+   "workflow_status": "completed",
+   "solve_seconds": 66.0,
+   "requested_treatment": {
+    "kind": "aether-single",
+    "model": "codex/gpt-6-luna",
+    "effort": "low"
+   },
+   "resolved_metadata": [
+    {
+     "source": "aether engine.session",
+     "agent_id": "a",
+     "session_id": "t",
+     "model": "gpt-6-luna",
+     "effort": null
+    },
+    {
+     "source": "native rollout turn_context",
+     "session_id": "t",
+     "model": "gpt-6-luna",
+     "effort": "low",
+     "agent_id": "a"
+    }
+   ],
+   "grade": {
+    "passed": 22,
+    "total": 22,
+    "errors": []
+   },
+   "success": true,
+   "status": "completed",
+   "usage_report": {
+    "usage": {
+     "uncached_input_tokens": 1100,
+     "output_tokens": 550,
+     "cache_read_tokens": 9500,
+     "cache_write_tokens": 0,
+     "total_tokens": 11150,
+     "api_equivalent_cost_usd": null
+    },
+    "coverage": {
+     "uncached_input_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "output_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "cache_read_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "cache_write_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "total_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "api_equivalent_cost_usd": {
+      "reported": 0,
+      "terminal": 0,
+      "units": 1,
+      "billed": 0,
+      "estimated": 0,
+      "unpriced": 1,
+      "complete": false
+     }
+    }
+   }
+  },
+  {
+   "short_id": "l3",
+   "condition": "native-luna-low",
+   "case": "ledger",
+   "run": 2,
+   "trial_dir": "target/hb/l3",
+   "workflow_status": "completed",
+   "solve_seconds": 61.0,
+   "requested_treatment": {
+    "kind": "native-claude",
+    "model": "gpt-6-luna",
+    "effort": "low"
+   },
+   "resolved_metadata": [
+    {
+     "source": "native rollout turn_context",
+     "session_id": "t",
+     "model": "gpt-6-luna",
+     "effort": "low"
+    }
+   ],
+   "grade": null,
+   "success": false,
+   "status": "failed",
+   "usage_report": {
+    "usage": {
+     "uncached_input_tokens": 1200,
+     "output_tokens": 700,
+     "cache_read_tokens": 9100,
+     "cache_write_tokens": 0,
+     "total_tokens": 11000,
+     "api_equivalent_cost_usd": 0.01
+    },
+    "coverage": {
+     "uncached_input_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "output_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "cache_read_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "cache_write_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "total_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "api_equivalent_cost_usd": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "billed": 0,
+      "estimated": 1,
+      "unpriced": 0,
+      "complete": true
+     }
+    }
+   },
+   "grade_error": "grade() raised ValueError"
+  },
+  {
+   "short_id": "l4",
+   "condition": "aether-single-luna-low",
+   "case": "ledger",
+   "run": 2,
+   "trial_dir": "target/hb/l4",
+   "workflow_status": "completed",
+   "solve_seconds": 5.0,
+   "requested_treatment": {
+    "kind": "aether-single",
+    "model": "codex/gpt-6-luna",
+    "effort": "low"
+   },
+   "resolved_metadata": [
+    {
+     "source": "aether engine.session",
+     "agent_id": "a",
+     "session_id": "t",
+     "model": "gpt-6-luna",
+     "effort": null
+    },
+    {
+     "source": "native rollout turn_context",
+     "session_id": "t",
+     "model": "gpt-6-luna",
+     "effort": "low",
+     "agent_id": "a"
+    }
+   ],
+   "grade": {
+    "passed": 3,
+    "total": 22,
+    "errors": []
+   },
+   "success": false,
+   "status": "blocked",
+   "usage_report": {
+    "usage": {
+     "uncached_input_tokens": 50,
+     "output_tokens": 10,
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "total_tokens": 60,
+     "api_equivalent_cost_usd": null
+    },
+    "coverage": {
+     "uncached_input_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "output_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "cache_read_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "cache_write_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "total_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "api_equivalent_cost_usd": {
+      "reported": 0,
+      "terminal": 0,
+      "units": 1,
+      "billed": 0,
+      "estimated": 0,
+      "unpriced": 1,
+      "complete": false
+     }
+    }
+   }
+  },
+  {
+   "short_id": "l5",
+   "condition": "native-claude",
+   "case": "ledger",
+   "run": 1,
+   "trial_dir": "target/hb/l5",
+   "workflow_status": "completed",
+   "solve_seconds": 90.0,
+   "requested_treatment": {
+    "kind": "native-claude",
+    "model": null,
+    "effort": "low"
+   },
+   "resolved_metadata": [
+    {
+     "source": "native system.init",
+     "model": "claude-haiku-5-5",
+     "effort": null,
+     "session_id": "s"
+    }
+   ],
+   "grade": {
+    "passed": 22,
+    "total": 22,
+    "errors": []
+   },
+   "success": true,
+   "status": "completed",
+   "usage_report": {
+    "usage": {
+     "uncached_input_tokens": 10,
+     "output_tokens": 10,
+     "cache_read_tokens": 10,
+     "cache_write_tokens": 10,
+     "total_tokens": 40,
+     "api_equivalent_cost_usd": 0.5
+    },
+    "coverage": {
+     "uncached_input_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "output_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "cache_read_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "cache_write_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "total_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "api_equivalent_cost_usd": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "billed": 1,
+      "estimated": 0,
+      "unpriced": 0,
+      "complete": true
+     }
+    }
+   }
+  }
+ ]
+}

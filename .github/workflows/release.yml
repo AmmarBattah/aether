@@ -1,0 +1,169 @@
+name: release
+
+# A pushed tag builds the four binaries and opens a draft release for the
+# owner to publish. A manual run defaults to a dry run: same build, no release.
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run: build and upload workflow artifacts, create no release"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      publish: ${{ steps.tag.outputs.publish }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # With no argument rustup installs what rust-toolchain.toml pins.
+      - name: install the pinned Rust toolchain
+        run: rustup toolchain install
+      - name: the tag must be the workspace version and have release notes
+        id: tag
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          if [ "$REF_TYPE" = tag ]; then
+            tag="$REF_NAME"
+          elif [ "$DRY_RUN" = true ]; then
+            tag="v$(scripts/release.sh version)"
+          else
+            echo "::error::a release is built from a tag: run this workflow on the tag, or tick the dry run"
+            exit 1
+          fi
+          scripts/release.sh check-tag "$tag"
+          # The draft's text: a tag without its changelog section fails here, before any build.
+          scripts/release.sh notes "$tag" >/dev/null
+          echo "tag=$tag" >>"$GITHUB_OUTPUT"
+          if [ "$DRY_RUN" = true ]; then
+            echo "publish=false" >>"$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >>"$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: verify
+    strategy:
+      matrix:
+        include:
+          # Linux binaries link musl statically: they need no glibc at all.
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-24.04
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+          - target: aarch64-apple-darwin
+            runner: macos-15
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    env:
+      TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: install the pinned Rust toolchain and the target
+        run: |
+          rustup toolchain install
+          rustup target add "$TARGET"
+          rustc --version
+      - name: install the musl C compiler
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends musl-tools
+      # Builds with --release --locked, runs the binary, then archives it.
+      - name: build, smoke-test and package
+        run: scripts/release.sh package "$TARGET" dist
+      # The real install.sh installs the archive from a server on this runner;
+      # the installed binary then reports its version and that it is up to date.
+      - name: install the archive as a user would
+        run: scripts/release.sh install-check "$TARGET" dist
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: aether-${{ matrix.target }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  assemble:
+    needs: [verify, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      TAG: ${{ needs.verify.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: aether-*
+          path: dist
+          merge-multiple: true
+      - name: write SHA256SUMS and VERSION
+        run: scripts/release.sh checksums "$TAG" dist
+      # The draft's text, from CHANGELOG.md; it is not uploaded as a release asset.
+      - name: write the release notes
+        run: scripts/release.sh notes "$TAG" >dist/RELEASE_NOTES.md
+      # This is the whole release; a dry run stops here with it as an artifact.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-assets
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: [verify, assemble]
+    if: needs.verify.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      # Both are for the build provenance attestation only.
+      id-token: write
+      attestations: write
+    env:
+      TAG: ${{ needs.verify.outputs.tag }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-assets
+          path: dist
+      # Attestations for a private repository need a plan this one is not on.
+      - name: attest build provenance
+        if: ${{ !github.event.repository.private }}
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: dist/SHA256SUMS
+      # A draft: nothing is downloadable as "latest" until the owner publishes it.
+      - name: create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "$TAG" dist/aether-*.tar.gz dist/aether-*.tar.gz.sha256 \
+            dist/SHA256SUMS dist/VERSION \
+            --draft --verify-tag --notes-file dist/RELEASE_NOTES.md --title "$TAG"

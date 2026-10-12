@@ -1,0 +1,40 @@
+── unicode 80 compact
+• Explored
+  └ Read store.rs, wal.rs, lib.rs
+    Search sync_data in crates/aether-store
+    List crates/aether-store/src
+── unicode 80 detail
+• Explored
+  └ Read store.rs, wal.rs, lib.rs
+    Search sync_data in crates/aether-store
+    List crates/aether-store/src
+── unicode 120 compact
+• Explored
+  └ Read store.rs, wal.rs, lib.rs
+    Search sync_data in crates/aether-store
+    List crates/aether-store/src
+── unicode 120 detail
+• Explored
+  └ Read store.rs, wal.rs, lib.rs
+    Search sync_data in crates/aether-store
+    List crates/aether-store/src
+── ascii 80 compact
+* Explored
+  \ Read store.rs, wal.rs, lib.rs
+    Search sync_data in crates/aether-store
+    List crates/aether-store/src
+── ascii 80 detail
+* Explored
+  \ Read store.rs, wal.rs, lib.rs
+    Search sync_data in crates/aether-store
+    List crates/aether-store/src
+── ascii 120 compact
+* Explored
+  \ Read store.rs, wal.rs, lib.rs
+    Search sync_data in crates/aether-store
+    List crates/aether-store/src
+── ascii 120 detail
+* Explored
+  \ Read store.rs, wal.rs, lib.rs
+    Search sync_data in crates/aether-store
+    List crates/aether-store/src

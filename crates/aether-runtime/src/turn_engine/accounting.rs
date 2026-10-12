@@ -1,0 +1,256 @@
+//! Native engine accounting.
+use super::{
+    AgentFilter, AgentId, Arc, Commit, Crossed, EventKind, InvocationSnapshot, ModelCost,
+    ModelPrice, Mutation, ResolvedModel, Result, Runtime, RuntimeError, TurnCtx, Usage, json,
+};
+
+/// Recompute the tail layer's token count and the snapshot's total from
+/// `snapshot.messages`, the source of truth. Called once when the snapshot
+/// is first built, and again after [`contract::resend_everything`] rewrites
+/// the user turn - the earlier tail/token_estimate were sized to the trimmed
+/// prompt and would under-report what the retry actually sends.
+pub(super) fn recompute_snapshot_accounting(snapshot: &mut InvocationSnapshot) {
+    let estimator = aether_context::estimate::TokenEstimator;
+    for layer in &mut snapshot.layers {
+        if layer.kind == aether_core::snapshot::LayerKind::RecentTail {
+            layer.tokens = estimator.messages(&snapshot.messages);
+            layer.items = snapshot.messages.len() as u32;
+        }
+    }
+    snapshot.token_estimate = snapshot.layers.iter().map(|layer| layer.tokens).sum();
+}
+
+pub(super) fn record_context_usage(
+    runtime: &Runtime,
+    ctx: &mut TurnCtx,
+    tokens: u64,
+) -> Result<()> {
+    ctx.agent.stats.context_tokens = Some(tokens);
+    let mut commit = Commit::new().event(ctx.draft(EventKind::Custom {
+        name: "context.usage".into(),
+        payload: json!({"tokens": tokens}),
+    }));
+    let hold = runtime.hold();
+    commit.push_mutation(Mutation::UpsertAgent(crate::turn::agent_row(
+        runtime, ctx, &hold,
+    )?));
+    runtime.apply_held(hold, commit)?;
+    Ok(())
+}
+
+/// How one engine turn is priced: the registry's price for the model where it
+/// has one, and otherwise the list price of the API model behind the
+/// subscription, which can only ever produce an *estimate*. Never both - a
+/// priced invocation needs no estimate - which is what
+/// [`aether_model::Registry::api_equivalent_price`] guarantees.
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct TurnPricing {
+    pub(super) billed: Option<ModelCost>,
+    pub(super) estimate: Option<ModelCost>,
+}
+
+impl TurnPricing {
+    pub(super) fn of(runtime: &Arc<Runtime>, resolved: &ResolvedModel) -> Self {
+        let pricing = Self {
+            billed: resolved.model.capabilities.cost,
+            estimate: runtime.models.registry().api_equivalent_price(resolved),
+        };
+        debug_assert!(
+            pricing.billed.is_none() || pricing.estimate.is_none(),
+            "a model with its own price must not also be estimated"
+        );
+        pricing
+    }
+
+    /// What the model an engine session reported costs, for a configured model
+    /// nobody could price - `codex/default`, `claude-code/default`, where the
+    /// CLI picks. `None` keeps the pricing the turn started with: an
+    /// unknown session model is left unpriced rather than given a price.
+    pub(super) fn of_session(
+        runtime: &Arc<Runtime>,
+        configured: &ResolvedModel,
+        reported: &str,
+    ) -> Option<Self> {
+        let pricing = match runtime
+            .models
+            .registry()
+            .session_model_price(configured, reported)?
+        {
+            ModelPrice::Billed(cost) => Self {
+                billed: Some(cost),
+                estimate: None,
+            },
+            ModelPrice::ApiEquivalent(cost) => Self {
+                billed: None,
+                estimate: Some(cost),
+            },
+        };
+        debug_assert!(
+            pricing.billed.is_none() || pricing.estimate.is_none(),
+            "a model with its own price must not also be estimated"
+        );
+        Some(pricing)
+    }
+
+    /// Price one invocation's tokens: billed dollars or an estimate, whichever
+    /// this model supports.
+    pub(super) fn apply(&self, usage: &mut Usage) {
+        usage.price_from(self.billed, self.estimate);
+    }
+
+    /// Charge the change in complete-request prices, preserving their cost provenance.
+    pub(super) fn request_delta(&self, request: &aether_engine::RequestUsage) -> Usage {
+        let mut previous = request.previous;
+        let mut total = request.total;
+        self.apply(&mut previous);
+        self.apply(&mut total);
+        let mut usage = Usage {
+            cost_usd: total.cost_usd - previous.cost_usd,
+            cost_complete: total.cost_complete,
+            cost_basis: total.cost_basis,
+            estimated_cost_usd: total
+                .estimated_cost_usd
+                .zip(previous.estimated_cost_usd)
+                .map(|(total, previous)| total - previous),
+            ..request.delta()
+        };
+        if !request.previous.cost_complete || !request.total.cost_complete {
+            usage.set_cost(None);
+        }
+        usage
+    }
+
+    /// The API-equivalent estimate for these counters, where one is available.
+    pub(super) fn estimate_of(&self, usage: &Usage) -> Option<f64> {
+        self.estimate.map(|rate| rate.cost_of(usage))
+    }
+
+    /// Keep request estimates, pricing extra closing counters at base rates as a floor.
+    /// Those counters have no request boundaries from which to select a prompt tier.
+    pub(super) fn request_estimate_of(&self, total: &Usage, streamed: &Usage) -> Option<f64> {
+        let rate = ModelCost {
+            above_threshold: None,
+            ..self.estimate?
+        };
+        let extra = Usage {
+            input_tokens: total.input_tokens.saturating_sub(streamed.input_tokens),
+            output_tokens: total.output_tokens.saturating_sub(streamed.output_tokens),
+            cache_read_tokens: total
+                .cache_read_tokens
+                .saturating_sub(streamed.cache_read_tokens),
+            cache_write_tokens: total
+                .cache_write_tokens
+                .saturating_sub(streamed.cache_write_tokens),
+            ..Usage::default()
+        };
+        Some(streamed.estimated_cost_usd.unwrap_or(0.0) + rate.cost_of(&extra))
+    }
+}
+
+/// Raise every token field of `usage` to `floor` where `floor` is higher.
+/// True when anything had to be raised - the engine reported less than it
+/// already had.
+pub(super) fn raise_to(usage: &mut Usage, floor: Usage) -> bool {
+    let before = *usage;
+    usage.input_tokens = usage.input_tokens.max(floor.input_tokens);
+    usage.output_tokens = usage.output_tokens.max(floor.output_tokens);
+    usage.cache_read_tokens = usage.cache_read_tokens.max(floor.cache_read_tokens);
+    usage.cache_write_tokens = usage.cache_write_tokens.max(floor.cache_write_tokens);
+    usage.reasoning_tokens = match (usage.reasoning_tokens, floor.reasoning_tokens) {
+        (None, None) => None,
+        (a, b) => Some(a.unwrap_or(0).max(b.unwrap_or(0))),
+    };
+    before.total_tokens() != usage.total_tokens()
+        || before.reasoning_tokens.unwrap_or(0) != usage.reasoning_tokens.unwrap_or(0)
+}
+
+/// What this agent's descendants have spent, cached for the turn. Reading it
+/// costs a pass over every agent the store holds, so it is refreshed only when
+/// someone else has committed since - this turn's own writes move this agent's
+/// row alone and are discounted. Keyed on the raw commit counter the cache
+/// never hit at all: every accounting commits this agent's row immediately
+/// before the check, so a supervisor paid a whole-fleet roll-up per message.
+#[derive(Default)]
+pub(super) struct SubtreeUsage {
+    /// Commits this turn's own event handling made.
+    pub(super) own: u64,
+    pub(super) read_at: Option<u64>,
+    pub(super) descendants: Usage,
+}
+
+impl SubtreeUsage {
+    pub(super) fn note_own_commits(&mut self, n: u64) {
+        self.own = self.own.saturating_add(n);
+    }
+
+    /// The store's commit count with this turn's own writes discounted.
+    pub(super) fn key(&self, store_commits: u64) -> u64 {
+        store_commits.saturating_sub(self.own)
+    }
+}
+
+/// The budget this agent has already crossed, if any, and the figure that
+/// crossed it. Its own grant covers its subtree, so descendants are rolled
+/// up too - but its own running figure is checked first and without touching
+/// the store, which is both the common crossing and the hot path. An
+/// ancestor's grant stays the scheduler's business (it stops the whole
+/// subtree); this only has to keep one engine turn from acting past its own.
+pub(super) fn budget_crossed(
+    runtime: &Arc<Runtime>,
+    ctx: &TurnCtx,
+    subtree: &mut SubtreeUsage,
+) -> Result<Option<Crossed>> {
+    if ctx.agent.config.token_budget.is_none() && ctx.agent.config.cost_budget.is_none() {
+        return Ok(None);
+    }
+    // This turn's own figure, which is newer than any stored row.
+    let own = ctx.agent.stats.usage;
+    if let Some(reason) = ctx.agent.budget_exceeded(&own) {
+        return Ok(Some(Crossed { reason, usage: own }));
+    }
+    let key = subtree.key(runtime.store.commits());
+    if subtree.read_at != Some(key) {
+        subtree.descendants = descendant_usage(runtime, ctx.agent.id)?;
+        subtree.read_at = Some(key);
+    }
+    let mut total = own;
+    total += subtree.descendants;
+    Ok(ctx.agent.budget_exceeded(&total).map(|reason| Crossed {
+        reason,
+        usage: total,
+    }))
+}
+
+/// Everything this agent's descendants have spent. Terminal descendants count:
+/// their spend already happened. Read over every agent rather than this run's,
+/// because a child may legally have been created under another run id.
+fn descendant_usage(runtime: &Arc<Runtime>, agent: AgentId) -> Result<Usage> {
+    // A leaf has no roll-up to read. Indexed on `parent`, so this costs one
+    // lookup instead of deserializing every agent the store has ever held.
+    if runtime
+        .store
+        .agents(&AgentFilter {
+            parent: Some(agent),
+            ..Default::default()
+        })?
+        .is_empty()
+    {
+        return Ok(Usage::default());
+    }
+    let mut agents = runtime.store.agents(&AgentFilter::default())?;
+    let Some(row) = agents.iter_mut().find(|a| a.id == agent) else {
+        // Fails closed. Enforcement without the agent's own row would quietly
+        // stop counting its children, which is how a grant stops binding.
+        tracing::error!(%agent, "no stored row while enforcing this agent's budget");
+        return Err(RuntimeError::NotFound(format!(
+            "agent {agent} while enforcing its budget"
+        )));
+    };
+    // Zeroed so the roll-up is the descendants alone: the caller adds this
+    // turn's own figure, which the stored row does not yet have.
+    row.stats.usage = Usage::default();
+    Ok(aether_core::budget::subtree_usage(&agents)
+        .get(&agent)
+        .copied()
+        .unwrap_or_default())
+}

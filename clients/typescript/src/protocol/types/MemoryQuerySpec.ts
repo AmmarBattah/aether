@@ -1,0 +1,21 @@
+// Generated from clients/protocol.schema.json by scripts/generate_clients.py.
+// Do not edit: change the Rust types and regenerate.
+
+import type {
+  AgentId,
+  MemoryId,
+  MemoryKind,
+  MemoryScope,
+} from "../../protocol.ts";
+
+export interface MemoryQuerySpec {
+  "id"?: MemoryId | null;
+  "include_forgotten"?: boolean;
+  "include_superseded"?: boolean;
+  "kinds"?: Array<MemoryKind>;
+  "limit"?: number;
+  "provenance_agent"?: AgentId | null;
+  "scope"?: MemoryScope | null;
+  "tags"?: Array<string>;
+  "text"?: string | null;
+}

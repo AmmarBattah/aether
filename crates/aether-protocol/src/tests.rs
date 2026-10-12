@@ -1,0 +1,443 @@
+use super::*;
+
+#[test]
+fn model_info_aliases_are_optional_and_roundtrip() {
+    let legacy = serde_json::json!({
+        "model": {"provider": "claude-code", "model": "claude-opus-5-5"},
+        "name": "Claude Opus 5.5",
+        "provider_name": "Claude Code",
+        "capabilities": aether_core::model::CapabilityProfile::default(),
+        "configured": true,
+        "is_default": false
+    });
+    let mut info: ModelInfo = serde_json::from_value(legacy.clone()).unwrap();
+    assert!(info.aliases.is_empty());
+    assert_eq!(serde_json::to_value(&info).unwrap(), legacy);
+    assert_eq!(decode::<ModelInfo>(&encode(&info).unwrap()).unwrap(), info);
+
+    info.aliases = vec!["opus".into(), "opus-5-5".into()];
+    let wire = serde_json::to_value(&info).unwrap();
+    assert_eq!(wire["aliases"], serde_json::json!(["opus", "opus-5-5"]));
+    assert_eq!(decode::<ModelInfo>(&encode(&info).unwrap()).unwrap(), info);
+}
+
+#[test]
+fn operator_memory_and_rename_wire_contracts() {
+    let agent = "agt_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+    let renamed: ClientFrame = decode(&format!(
+        r#"{{"req":1,"cmd":"update_agent","id":"{agent}","patch":{{"name":"名前 café"}}}}"#
+    ))
+    .unwrap();
+    assert!(
+        matches!(&renamed.command, Command::UpdateAgent { patch, .. } if patch.name.as_deref() == Some("名前 café"))
+    );
+    assert_eq!(
+        decode::<ClientFrame>(&encode(&renamed).unwrap()).unwrap(),
+        renamed
+    );
+    let old: AgentPatch = serde_json::from_str("{}").unwrap();
+    assert!(old.name.is_none());
+    let base = serde_json::json!({"req":2,"cmd":"create_memory","spec":{"text":"Keep this durable fact across sessions.","kind":"fact","scope":{"scope":"global"}}});
+    let frame: ClientFrame = serde_json::from_value(base.clone()).unwrap();
+    assert_eq!(
+        decode::<ClientFrame>(&encode(&frame).unwrap()).unwrap(),
+        frame
+    );
+    for (field, value) in [
+        ("provenance", serde_json::json!({"agent":agent})),
+        ("kind", serde_json::json!("unknown")),
+        (
+            "scope",
+            serde_json::json!({"scope":"repository", "id":"fabricated"}),
+        ),
+    ] {
+        let mut invalid = base.clone();
+        invalid["spec"][field] = value;
+        assert!(
+            serde_json::from_value::<ClientFrame>(invalid).is_err(),
+            "{field}"
+        );
+    }
+    let mut missing_scope = base;
+    missing_scope["spec"]
+        .as_object_mut()
+        .unwrap()
+        .remove("scope");
+    assert!(serde_json::from_value::<ClientFrame>(missing_scope).is_err());
+}
+
+#[test]
+fn memory_provenance_filter_is_optional_and_roundtrips() {
+    let legacy: MemoryQuerySpec = serde_json::from_str("{}").unwrap();
+    assert_eq!(legacy.provenance_agent, None);
+    assert!(
+        serde_json::to_value(&legacy)
+            .unwrap()
+            .get("provenance_agent")
+            .is_none()
+    );
+    let agent = AgentId::new();
+    let query: MemoryQuerySpec = serde_json::from_value(serde_json::json!({
+        "provenance_agent": agent, "limit": 200
+    }))
+    .unwrap();
+    let roundtrip: MemoryQuerySpec =
+        serde_json::from_value(serde_json::to_value(&query).unwrap()).unwrap();
+    let stored: aether_store::MemoryQuery = roundtrip.into();
+    assert_eq!(stored.provenance_agent, Some(agent));
+    assert_eq!(stored.limit, 200);
+    assert!(stored.scope.is_none());
+}
+
+/// The commands a client can key, each with a key set.
+#[test]
+fn client_frame_flattens_command() {
+    let frame = ClientFrame {
+        id: 7,
+        command: Command::Status,
+    };
+    let json = serde_json::to_value(&frame).expect("ser");
+    assert_eq!(json["req"], 7);
+    assert_eq!(json["cmd"], "status");
+    let back: ClientFrame = serde_json::from_value(json).expect("de");
+    assert_eq!(back, frame);
+}
+
+#[test]
+fn every_command_survives_the_frame_roundtrip() {
+    let agent = AgentId::new();
+    let commands = vec![
+        Command::Hello(Hello::new("t", "0")),
+        Command::GetAgent { id: agent },
+        Command::GetTask { id: TaskId::new() },
+        Command::UpdateAgent {
+            id: agent,
+            patch: AgentPatch::default(),
+        },
+        Command::ResolveApproval {
+            id: ApprovalId::new(),
+            decision: ApprovalDecision::Approved,
+            note: None,
+            remember: None,
+        },
+        Command::ResolveApproval {
+            id: ApprovalId::new(),
+            decision: ApprovalDecision::Approved,
+            note: Some("ok".into()),
+            remember: Some(RememberSpec {
+                scope: Some(RuleScope::Subtree { root: agent }),
+                tool_wide: true,
+                note: None,
+            }),
+        },
+        // The narrowest form: no scope, no widening.
+        Command::ResolveApproval {
+            id: ApprovalId::new(),
+            decision: ApprovalDecision::Denied,
+            note: None,
+            remember: Some(RememberSpec::default()),
+        },
+        Command::ListApprovalRules {
+            include_revoked: true,
+        },
+        Command::ListArtifacts {
+            query: ArtifactQuery::default(),
+        },
+        Command::McpServers {
+            refresh: true,
+            server: Some("files".into()),
+        },
+        Command::Providers,
+        Command::AddApprovalRule(NewApprovalRule {
+            decision: ApprovalDecision::Denied,
+            matcher: RuleMatch::tool("bash").with_argument("rm -rf *"),
+            scope: RuleScope::Everywhere,
+            note: Some("never".into()),
+        }),
+        Command::RevokeApprovalRule {
+            id: ApprovalRuleId::new(),
+            reason: None,
+        },
+        Command::Unsubscribe { id: 3 },
+        Command::Compact { agent },
+        Command::Restart { agent },
+        Command::Wake { agent },
+        Command::EngineTool {
+            agent,
+            token: "t".into(),
+            name: "complete_task".into(),
+            input: serde_json::json!({"summary": "done"}),
+        },
+        Command::GetSnapshot {
+            id: SnapshotId::new(),
+        },
+        Command::GetInvocation {
+            id: InvocationId::new(),
+        },
+        Command::GetCheckpoint {
+            id: CheckpointId::new(),
+        },
+        Command::GetArtifact {
+            id: ArtifactId::new(),
+        },
+        Command::ReadArtifact {
+            id: ArtifactId::new(),
+            max_bytes: 10,
+        },
+        Command::Subscribe {
+            after: Some(1),
+            query: EventQuery::default(),
+            deltas: true,
+        },
+        Command::SendMessage {
+            to: agent,
+            content: "hi".into(),
+            subtree: true,
+            idempotency_key: None,
+        },
+        Command::SendMessage {
+            to: agent,
+            content: "hi".into(),
+            subtree: false,
+            idempotency_key: Some("outbox-7".into()),
+        },
+        Command::Pause {
+            agent,
+            subtree: true,
+        },
+        Command::Resume {
+            agent,
+            subtree: false,
+        },
+        Command::UpdateAgent {
+            id: agent,
+            patch: AgentPatch {
+                deadline: Some(DeadlineUpdate::Clear),
+                ..Default::default()
+            },
+        },
+        Command::UpdateAgent {
+            id: agent,
+            patch: AgentPatch {
+                deadline: Some(DeadlineUpdate::Set(aether_core::time::now())),
+                ..Default::default()
+            },
+        },
+        // These four shapes are non-trivial encodings that were once
+        // missing from this roundtrip.
+        Command::GetTree {
+            run: Some(RunId::new()),
+            include_archived: true,
+        },
+        Command::Archive {
+            target: ArchiveTarget::Agent(agent),
+            archived: true,
+        },
+        Command::Archive {
+            target: ArchiveTarget::Run(RunId::new()),
+            archived: false,
+        },
+        Command::Archive {
+            target: ArchiveTarget::AllFinished,
+            archived: true,
+        },
+        Command::SetApprovals {
+            agent,
+            policy: ApprovalPolicy::none(),
+            subtree: true,
+        },
+        Command::CreateAgent(CreateAgent {
+            role: "worker".into(),
+            approval: Some(ApprovalPolicy::default()),
+            ..Default::default()
+        }),
+        Command::CreateAgent(CreateAgent {
+            role: "worker".into(),
+            idempotency_key: Some("outbox-8".into()),
+            ..Default::default()
+        }),
+        Command::Trigger {
+            agent,
+            source: "ci".into(),
+            payload: serde_json::json!({"run": 1}),
+            idempotency_key: Some("outbox-9".into()),
+        },
+    ];
+    for command in commands {
+        let frame = ClientFrame {
+            id: 42,
+            command: command.clone(),
+        };
+        let line = encode(&frame).expect("encode");
+        let back: ClientFrame = decode(&line).expect("decode");
+        assert_eq!(back.id, 42, "{line}");
+        assert_eq!(back.command, command, "{line}");
+    }
+}
+
+#[test]
+fn server_frames_roundtrip() {
+    let reply = ServerFrame::Reply {
+        id: 1,
+        result: Err(ErrorReply::new(
+            ErrorCode::NotFound,
+            "agent agt_x not found",
+        )),
+    };
+    let line = encode(&reply).expect("encode");
+    assert!(line.ends_with('\n'));
+    let back: ServerFrame = decode(&line).expect("decode");
+    assert_eq!(back, reply);
+    let delta = ServerFrame::Delta {
+        sub: 3,
+        agent: AgentId::new(),
+        invocation: InvocationId::new(),
+        delta: Delta::Text { text: "hi".into() },
+    };
+    let back: ServerFrame = decode(&encode(&delta).expect("e")).expect("d");
+    assert_eq!(back, delta);
+}
+
+/// The reply shapes the client decodes for pause, resume, fan-out and
+/// `set`. A daemon answering a different variant is the bug this pins.
+#[test]
+fn the_replies_pause_resume_and_fan_out_produce_survive_the_roundtrip() {
+    let agent = AgentId::new();
+    for reply in [
+        Reply::Paused {
+            agents: Vec::new(),
+            mid_turn: vec![agent],
+        },
+        Reply::Agents(Vec::new()),
+        Reply::MessagesSent {
+            deliveries: vec![MessageDelivery {
+                agent,
+                message: MessageId::new(),
+            }],
+        },
+    ] {
+        let frame = ServerFrame::Reply {
+            id: 1,
+            result: Ok(reply.clone()),
+        };
+        let line = encode(&frame).expect("encode");
+        let back: ServerFrame = decode(&line).expect("decode");
+        assert_eq!(back, frame, "{line}");
+    }
+}
+
+/// A client built before the `Paused` reply changed shape must be refused
+/// at hello, not left failing to decode the reply with an opaque error.
+/// The version guard is a compile-time one: the shapes below and the
+/// constant move together.
+const _: () = assert!(PROTOCOL_VERSION >= 2);
+
+#[test]
+fn the_reply_shapes_this_version_changed_no_longer_decode() {
+    for old in [
+        r#"{"reply":"paused","data":{"after_current_turn":true}}"#,
+        r#"{"reply":"paused","data":{}}"#,
+    ] {
+        assert!(
+            serde_json::from_str::<Reply>(old).is_err(),
+            "the old `Paused` shape must not decode: {old}"
+        );
+    }
+    // A forward guard, not a v1 shape: `deadline` arrived with this
+    // version, and a bare timestamp must never read as `Set`.
+    let patch = r#"{"deadline":"2030-01-02T03:04:05Z"}"#;
+    assert!(
+        serde_json::from_str::<AgentPatch>(patch).is_err(),
+        "a bare timestamp must not decode as a deadline update"
+    );
+}
+
+/// A provider row with every optional health field populated, so the
+/// additive fields are exercised on the wire.
+fn provider_info() -> ProviderInfo {
+    use aether_core::model::ModelErrorClass;
+    use aether_core::provider::{ErrorTally, FallbackRecord, ProviderBackoff, QuotaWindow};
+    ProviderInfo {
+        provider: "anthropic".into(),
+        name: "Anthropic".into(),
+        protocol: "anthropic-messages".into(),
+        family: Some("claude".into()),
+        base_url: "https://api.anthropic.com".into(),
+        engine: false,
+        models: 4,
+        open_model_list: false,
+        enabled: true,
+        configured: true,
+        auth_source: Some("ANTHROPIC_API_KEY".into()),
+        health: ProviderHealth {
+            running: 1,
+            limit: Some(2),
+            backoff: Some(ProviderBackoff {
+                reason: "rate limited".into(),
+                until: aether_core::time::now(),
+            }),
+            quota: Some(QuotaWindow {
+                used_percent: 40,
+                window_minutes: Some(300),
+            }),
+            recent_errors: vec![ErrorTally {
+                class: ModelErrorClass::RateLimit,
+                count: 2,
+                last_at: aether_core::time::now(),
+            }],
+            last_fallback: Some(FallbackRecord {
+                to: ModelRef::new("claude-code", "haiku"),
+                reason: "rate limited".into(),
+                class: Some(ModelErrorClass::RateLimit),
+                at: aether_core::time::now(),
+            }),
+            ..ProviderHealth::idle("anthropic")
+        },
+    }
+}
+
+#[test]
+fn sequence_replies_encode() {
+    for reply in [
+        Reply::Agents(vec![]),
+        Reply::Models(vec![]),
+        Reply::Providers(vec![provider_info()]),
+        Reply::Auth(vec![]),
+        Reply::Checkpoint(None),
+        Reply::Ok,
+        Reply::Subscribed { id: 1, last_seq: 2 },
+    ] {
+        let frame = ServerFrame::Reply {
+            id: 1,
+            result: Ok(reply.clone()),
+        };
+        let line = encode(&frame).expect("encode");
+        let back: ServerFrame = decode(&line).expect("decode");
+        assert_eq!(back, frame);
+    }
+}
+
+#[test]
+fn create_agent_defaults_to_start() {
+    let json = r#"{"role":"root"}"#;
+    let req: CreateAgent = serde_json::from_str(json).expect("de");
+    assert!(req.start);
+    assert_eq!(req.role, "root");
+    assert!(
+        CreateAgent::default().start,
+        "Rust default must match the wire default"
+    );
+}
+
+#[path = "tests/idempotency.rs"]
+mod idempotency;
+
+#[test]
+fn event_query_before_is_optional_and_old_wire_shape_is_unchanged() {
+    let old = serde_json::json!({"families": [], "types": []});
+    let query: EventQuery = serde_json::from_value(old.clone()).unwrap();
+    assert_eq!(query.before, None);
+    assert_eq!(serde_json::to_value(query).unwrap(), old);
+    let query: EventQuery = serde_json::from_value(serde_json::json!({"before": 42})).unwrap();
+    assert_eq!(query.before, Some(42));
+}

@@ -1,0 +1,4 @@
+[env]
+# Bundled SQLite syncs with fsync(2) unless told fdatasync(2) exists. On ext4 the
+# WAL-restart sync inside COMMIT then waits on the journal: 30 s under I/O load.
+LIBSQLITE3_FLAGS = "-DHAVE_FDATASYNC=1"

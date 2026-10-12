@@ -1,0 +1,36 @@
+── unicode 80 compact
+
+› Fix the flaky shell_bg test and explain the root cause in store.rs before
+  touching anything else in the crate.
+
+── unicode 80 detail
+
+› Fix the flaky shell_bg test and explain the root cause in store.rs before
+  touching anything else in the crate.
+
+── unicode 120 compact
+
+› Fix the flaky shell_bg test and explain the root cause in store.rs before touching anything else in the crate.
+
+── unicode 120 detail
+
+› Fix the flaky shell_bg test and explain the root cause in store.rs before touching anything else in the crate.
+
+── ascii 80 compact
+
+> Fix the flaky shell_bg test and explain the root cause in store.rs before
+  touching anything else in the crate.
+
+── ascii 80 detail
+
+> Fix the flaky shell_bg test and explain the root cause in store.rs before
+  touching anything else in the crate.
+
+── ascii 120 compact
+
+> Fix the flaky shell_bg test and explain the root cause in store.rs before touching anything else in the crate.
+
+── ascii 120 detail
+
+> Fix the flaky shell_bg test and explain the root cause in store.rs before touching anything else in the crate.
+

@@ -1,0 +1,6 @@
+data: {"id":"chatcmpl-conformance","model":"gpt-5","choices":[{"index":0,"delta":{"role":"assistant","content":"I can't help with that."},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-conformance","choices":[{"index":0,"delta":{},"finish_reason":"content_filter"}]}
+
+data: [DONE]
+

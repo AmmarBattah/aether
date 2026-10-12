@@ -1,0 +1,172 @@
+{
+ "binary_sha256": "d687547b7c7b55a770927af54ef434a1fe25e004e488a31c3dd762b771608512",
+ "source": "isolated daemon list_models",
+ "models": [
+  {
+   "model": {
+    "provider": "claude-code",
+    "model": "claude-haiku-5-5"
+   },
+   "aliases": [
+    "haiku",
+    "haiku-5-5",
+    "haiku-5.5"
+   ],
+   "name": "Claude Haiku 5.5",
+   "provider_name": "Claude Code (subscription)",
+   "capabilities": {
+    "context_window": 200000,
+    "max_output_tokens": 128000,
+    "tools": true,
+    "parallel_tools": true,
+    "vision": true,
+    "thinking": "adaptive",
+    "effort": true,
+    "prompt_caching": true,
+    "structured_output": false,
+    "strict_tools": false,
+    "cost": {
+     "input_per_mtok": 0.1,
+     "output_per_mtok": 0.5,
+     "cache_read_per_mtok": 0.010000000000000002,
+     "cache_write_per_mtok": 0.125
+    },
+    "extensions": {}
+   },
+   "configured": true,
+   "auth_source": "claude login",
+   "is_default": false
+  },
+  {
+   "model": {
+    "provider": "codex",
+    "model": "gpt-6-luna"
+   },
+   "aliases": [
+    "luna"
+   ],
+   "name": "GPT-6 Luna",
+   "provider_name": "Codex (ChatGPT subscription)",
+   "capabilities": {
+    "context_window": 272000,
+    "max_output_tokens": 128000,
+    "tools": true,
+    "parallel_tools": true,
+    "vision": true,
+    "thinking": "adaptive",
+    "effort": true,
+    "prompt_caching": true,
+    "structured_output": false,
+    "strict_tools": false,
+    "cost": {
+     "input_per_mtok": 0.1,
+     "output_per_mtok": 0.5,
+     "cache_read_per_mtok": 0.010000000000000002,
+     "cache_write_per_mtok": 0.125
+    },
+    "extensions": {}
+   },
+   "configured": true,
+   "auth_source": "codex login",
+   "is_default": false
+  },
+  {
+   "model": {
+    "provider": "anthropic",
+    "model": "claude-haiku-5-5"
+   },
+   "aliases": [
+    "haiku",
+    "haiku-5-5",
+    "haiku-5.5"
+   ],
+   "name": "Claude Haiku 5.5",
+   "provider_name": "Anthropic",
+   "capabilities": {
+    "context_window": 1000000,
+    "max_output_tokens": 128000,
+    "tools": true,
+    "parallel_tools": true,
+    "vision": true,
+    "thinking": "adaptive",
+    "effort": true,
+    "prompt_caching": true,
+    "structured_output": true,
+    "strict_tools": true,
+    "cost": {
+     "input_per_mtok": 0.1,
+     "output_per_mtok": 0.5,
+     "cache_read_per_mtok": 0.010000000000000002,
+     "cache_write_per_mtok": 0.125
+    },
+    "extensions": {}
+   },
+   "configured": false,
+   "is_default": false
+  },
+  {
+   "model": {
+    "provider": "openai",
+    "model": "gpt-6-luna"
+   },
+   "aliases": [
+    "luna"
+   ],
+   "name": "GPT-6 Luna",
+   "provider_name": "OpenAI",
+   "capabilities": {
+    "context_window": 1050000,
+    "max_output_tokens": 128000,
+    "tools": true,
+    "parallel_tools": true,
+    "vision": true,
+    "thinking": "adaptive",
+    "effort": true,
+    "prompt_caching": true,
+    "structured_output": true,
+    "strict_tools": true,
+    "cost": {
+     "input_per_mtok": 0.1,
+     "output_per_mtok": 0.5,
+     "cache_read_per_mtok": 0.010000000000000002,
+     "cache_write_per_mtok": 0.125
+    },
+    "extensions": {}
+   },
+   "configured": false,
+   "is_default": false
+  },
+  {
+   "model": {
+    "provider": "openai-responses",
+    "model": "gpt-6-luna"
+   },
+   "aliases": [
+    "luna"
+   ],
+   "name": "GPT-6 Luna",
+   "provider_name": "OpenAI (Responses)",
+   "capabilities": {
+    "context_window": 1050000,
+    "max_output_tokens": 128000,
+    "tools": true,
+    "parallel_tools": true,
+    "vision": true,
+    "thinking": "adaptive",
+    "effort": true,
+    "prompt_caching": true,
+    "structured_output": true,
+    "strict_tools": true,
+    "cost": {
+     "input_per_mtok": 0.1,
+     "output_per_mtok": 0.5,
+     "cache_read_per_mtok": 0.010000000000000002,
+     "cache_write_per_mtok": 0.125
+    },
+    "extensions": {}
+   },
+   "configured": false,
+   "is_default": false
+  }
+ ]
+}

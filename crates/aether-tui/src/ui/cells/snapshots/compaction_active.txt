@@ -1,0 +1,16 @@
+── unicode 80 compact
+• Compacting context
+── unicode 80 detail
+• Compacting context
+── unicode 120 compact
+• Compacting context
+── unicode 120 detail
+• Compacting context
+── ascii 80 compact
+* Compacting context
+── ascii 80 detail
+* Compacting context
+── ascii 120 compact
+* Compacting context
+── ascii 120 detail
+* Compacting context

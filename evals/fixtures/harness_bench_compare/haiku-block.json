@@ -1,0 +1,332 @@
+{
+ "note": "Synthetic manifest for the report unit tests; not a measurement of any model.",
+ "pilot": false,
+ "jobs": 4,
+ "seed": 3,
+ "runs": 1,
+ "trials": [
+  {
+   "short_id": "h1",
+   "condition": "native-haiku-low",
+   "case": "matchbook",
+   "run": 1,
+   "trial_dir": "target/hb/h1",
+   "workflow_status": "completed",
+   "solve_seconds": 200.0,
+   "requested_treatment": {
+    "kind": "native-claude",
+    "model": "claude-haiku-5-5",
+    "effort": "low"
+   },
+   "resolved_metadata": [
+    {
+     "source": "native system.init",
+     "model": "claude-haiku-5-5",
+     "effort": null,
+     "session_id": "s"
+    }
+   ],
+   "grade": {
+    "passed": 72,
+    "total": 80,
+    "errors": []
+   },
+   "success": false,
+   "status": "failed",
+   "usage_report": {
+    "usage": {
+     "uncached_input_tokens": 100,
+     "output_tokens": 1000,
+     "cache_read_tokens": 5000,
+     "cache_write_tokens": 200,
+     "total_tokens": 6300,
+     "api_equivalent_cost_usd": 0.05
+    },
+    "coverage": {
+     "uncached_input_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "output_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "cache_read_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "cache_write_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "total_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "api_equivalent_cost_usd": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "billed": 1,
+      "estimated": 0,
+      "unpriced": 0,
+      "complete": true
+     }
+    }
+   }
+  },
+  {
+   "short_id": "h2",
+   "condition": "aether-single-haiku-low",
+   "case": "matchbook",
+   "run": 1,
+   "trial_dir": "target/hb/h2",
+   "workflow_status": "completed",
+   "solve_seconds": 230.0,
+   "requested_treatment": {
+    "kind": "aether-single",
+    "model": "claude-code/claude-haiku-5-5",
+    "effort": "low"
+   },
+   "resolved_metadata": [
+    {
+     "source": "aether engine.session",
+     "agent_id": "a",
+     "session_id": "s",
+     "model": "claude-haiku-5-5",
+     "effort": null
+    }
+   ],
+   "grade": {
+    "passed": 76,
+    "total": 80,
+    "errors": []
+   },
+   "success": false,
+   "status": "failed",
+   "usage_report": {
+    "usage": {
+     "uncached_input_tokens": 90,
+     "output_tokens": 900,
+     "cache_read_tokens": 4000,
+     "cache_write_tokens": 100,
+     "total_tokens": 5090,
+     "api_equivalent_cost_usd": 0.04
+    },
+    "coverage": {
+     "uncached_input_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "output_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "cache_read_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "cache_write_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "total_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "api_equivalent_cost_usd": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "billed": 1,
+      "estimated": 0,
+      "unpriced": 0,
+      "complete": true
+     }
+    }
+   },
+   "claude_reconciliation": {
+    "full_process_usage": {
+     "uncached_input_tokens": 120,
+     "output_tokens": 1100,
+     "cache_read_tokens": 5500,
+     "cache_write_tokens": 250,
+     "total_tokens": 6970,
+     "api_equivalent_cost_usd": 0.06
+    },
+    "coverage": {
+     "uncached_input_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "output_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "cache_read_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "cache_write_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "total_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "api_equivalent_cost_usd": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "billed": 1,
+      "estimated": 0,
+      "unpriced": 0,
+      "complete": true
+     }
+    }
+   }
+  },
+  {
+   "short_id": "h3",
+   "condition": "native-haiku-low",
+   "case": "gridcalc",
+   "run": 1,
+   "trial_dir": "target/hb/h3",
+   "workflow_status": "completed",
+   "solve_seconds": 300.0,
+   "requested_treatment": {
+    "kind": "native-claude",
+    "model": "claude-haiku-5-5",
+    "effort": "low"
+   },
+   "resolved_metadata": [
+    {
+     "source": "native system.init",
+     "model": "claude-haiku-5-5",
+     "effort": null,
+     "session_id": "s"
+    }
+   ],
+   "grade": {
+    "passed": 60,
+    "total": 100,
+    "errors": []
+   },
+   "success": false,
+   "status": "failed",
+   "usage_report": {
+    "usage": {
+     "uncached_input_tokens": 200,
+     "output_tokens": 2000,
+     "cache_read_tokens": 7000,
+     "cache_write_tokens": 300,
+     "total_tokens": 9500,
+     "api_equivalent_cost_usd": 0.07
+    },
+    "coverage": {
+     "uncached_input_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "output_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "cache_read_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "cache_write_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "total_tokens": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "complete": true
+     },
+     "api_equivalent_cost_usd": {
+      "reported": 1,
+      "terminal": 1,
+      "units": 1,
+      "billed": 1,
+      "estimated": 0,
+      "unpriced": 0,
+      "complete": true
+     }
+    }
+   }
+  },
+  {
+   "short_id": "h4",
+   "condition": "aether-single-haiku-low",
+   "case": "gridcalc",
+   "run": 1,
+   "trial_dir": "target/hb/h4",
+   "workflow_status": "timeout",
+   "solve_seconds": 310.0,
+   "requested_treatment": {
+    "kind": "aether-single",
+    "model": "claude-code/claude-haiku-5-5",
+    "effort": "low"
+   },
+   "resolved_metadata": [
+    {
+     "source": "aether engine.session",
+     "agent_id": "a",
+     "session_id": "s",
+     "model": "claude-haiku-5-5",
+     "effort": null
+    }
+   ],
+   "grade": {
+    "passed": 50,
+    "total": 100,
+    "errors": []
+   },
+   "success": false,
+   "status": "failed",
+   "usage_error": "no terminal usage was recorded"
+  }
+ ]
+}

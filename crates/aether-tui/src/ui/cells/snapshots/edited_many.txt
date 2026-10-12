@@ -1,0 +1,44 @@
+── unicode 80 compact
+• Edited 2 files (+2 -1)
+  └ src/wal.rs (+1 -1)
+    src/sync.rs (+1 -0)
+── unicode 80 detail
+• Edited 2 files (+2 -1)
+  └ src/wal.rs (+1 -1)
+        7 -old();
+        7 +new();
+    src/sync.rs (+1 -0)
+        1 +pub mod sync;
+── unicode 120 compact
+• Edited 2 files (+2 -1)
+  └ src/wal.rs (+1 -1)
+    src/sync.rs (+1 -0)
+── unicode 120 detail
+• Edited 2 files (+2 -1)
+  └ src/wal.rs (+1 -1)
+        7 -old();
+        7 +new();
+    src/sync.rs (+1 -0)
+        1 +pub mod sync;
+── ascii 80 compact
+* Edited 2 files (+2 -1)
+  \ src/wal.rs (+1 -1)
+    src/sync.rs (+1 -0)
+── ascii 80 detail
+* Edited 2 files (+2 -1)
+  \ src/wal.rs (+1 -1)
+        7 -old();
+        7 +new();
+    src/sync.rs (+1 -0)
+        1 +pub mod sync;
+── ascii 120 compact
+* Edited 2 files (+2 -1)
+  \ src/wal.rs (+1 -1)
+    src/sync.rs (+1 -0)
+── ascii 120 detail
+* Edited 2 files (+2 -1)
+  \ src/wal.rs (+1 -1)
+        7 -old();
+        7 +new();
+    src/sync.rs (+1 -0)
+        1 +pub mod sync;

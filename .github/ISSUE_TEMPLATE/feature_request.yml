@@ -1,0 +1,40 @@
+name: Feature request
+description: Propose a new capability or a change in behaviour
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For anything larger than a small fix, please open this issue and wait
+        for a maintainer's answer before writing the code. The
+        [open issues](https://github.com/mengsig/aether/issues) and the
+        [known limitations](https://github.com/mengsig/aether/blob/main/docs/known-limitations.md)
+        list larger ideas that are already known.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you propose
+      description: The behaviour you would like, from the user's point of view.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Including what you do today as a workaround.
+    validations:
+      required: false
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      options:
+        - label: I am willing to open a pull request for this.
+          required: false

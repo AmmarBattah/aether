@@ -1,0 +1,16 @@
+── unicode 80 compact
+• Anthropic busy · retrying in 8s
+── unicode 80 detail
+• Anthropic busy · retrying in 8s
+── unicode 120 compact
+• Anthropic busy · retrying in 8s
+── unicode 120 detail
+• Anthropic busy · retrying in 8s
+── ascii 80 compact
+* Anthropic busy | retrying in 8s
+── ascii 80 detail
+* Anthropic busy | retrying in 8s
+── ascii 120 compact
+* Anthropic busy | retrying in 8s
+── ascii 120 detail
+* Anthropic busy | retrying in 8s

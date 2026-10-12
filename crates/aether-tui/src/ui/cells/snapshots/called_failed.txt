@@ -1,0 +1,24 @@
+── unicode 80 compact
+• Failed to call spawn_agent()
+  └ Error: budget exhausted for this subtree
+── unicode 80 detail
+• Failed to call spawn_agent()
+  └ Error: budget exhausted for this subtree
+── unicode 120 compact
+• Failed to call spawn_agent()
+  └ Error: budget exhausted for this subtree
+── unicode 120 detail
+• Failed to call spawn_agent()
+  └ Error: budget exhausted for this subtree
+── ascii 80 compact
+* Failed to call spawn_agent()
+  \ Error: budget exhausted for this subtree
+── ascii 80 detail
+* Failed to call spawn_agent()
+  \ Error: budget exhausted for this subtree
+── ascii 120 compact
+* Failed to call spawn_agent()
+  \ Error: budget exhausted for this subtree
+── ascii 120 detail
+* Failed to call spawn_agent()
+  \ Error: budget exhausted for this subtree

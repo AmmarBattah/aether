@@ -1,0 +1,80 @@
+── unicode 80 compact
+• Ran cargo test -p aether-store wal
+  └ test wal::case 1
+    test wal::case 2
+    … +4 lines (ctrl+t to view)
+    test wal::case 7
+    test wal::case 8
+    test wal::case 9
+── unicode 80 detail
+• Ran cargo test -p aether-store wal
+  └ test wal::case 1
+    test wal::case 2
+    test wal::case 3
+    test wal::case 4
+    test wal::case 5
+    test wal::case 6
+    test wal::case 7
+    test wal::case 8
+    test wal::case 9
+    ✓ exit 0 • 1.2s
+── unicode 120 compact
+• Ran cargo test -p aether-store wal
+  └ test wal::case 1
+    test wal::case 2
+    … +4 lines (ctrl+t to view)
+    test wal::case 7
+    test wal::case 8
+    test wal::case 9
+── unicode 120 detail
+• Ran cargo test -p aether-store wal
+  └ test wal::case 1
+    test wal::case 2
+    test wal::case 3
+    test wal::case 4
+    test wal::case 5
+    test wal::case 6
+    test wal::case 7
+    test wal::case 8
+    test wal::case 9
+    ✓ exit 0 • 1.2s
+── ascii 80 compact
+* Ran cargo test -p aether-store wal
+  \ test wal::case 1
+    test wal::case 2
+    ~ +4 lines (ctrl+t to view)
+    test wal::case 7
+    test wal::case 8
+    test wal::case 9
+── ascii 80 detail
+* Ran cargo test -p aether-store wal
+  \ test wal::case 1
+    test wal::case 2
+    test wal::case 3
+    test wal::case 4
+    test wal::case 5
+    test wal::case 6
+    test wal::case 7
+    test wal::case 8
+    test wal::case 9
+    + exit 0 * 1.2s
+── ascii 120 compact
+* Ran cargo test -p aether-store wal
+  \ test wal::case 1
+    test wal::case 2
+    ~ +4 lines (ctrl+t to view)
+    test wal::case 7
+    test wal::case 8
+    test wal::case 9
+── ascii 120 detail
+* Ran cargo test -p aether-store wal
+  \ test wal::case 1
+    test wal::case 2
+    test wal::case 3
+    test wal::case 4
+    test wal::case 5
+    test wal::case 6
+    test wal::case 7
+    test wal::case 8
+    test wal::case 9
+    + exit 0 * 1.2s

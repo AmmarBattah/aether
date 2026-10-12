@@ -1,0 +1,24 @@
+── unicode 80 compact
+• Sent to researcher, tester
+  └ Stop after the store crate; the net crate is out of scope for this pass.
+── unicode 80 detail
+• Sent to researcher, tester
+  └ Stop after the store crate; the net crate is out of scope for this pass.
+── unicode 120 compact
+• Sent to researcher, tester
+  └ Stop after the store crate; the net crate is out of scope for this pass.
+── unicode 120 detail
+• Sent to researcher, tester
+  └ Stop after the store crate; the net crate is out of scope for this pass.
+── ascii 80 compact
+* Sent to researcher, tester
+  \ Stop after the store crate; the net crate is out of scope for this pass.
+── ascii 80 detail
+* Sent to researcher, tester
+  \ Stop after the store crate; the net crate is out of scope for this pass.
+── ascii 120 compact
+* Sent to researcher, tester
+  \ Stop after the store crate; the net crate is out of scope for this pass.
+── ascii 120 detail
+* Sent to researcher, tester
+  \ Stop after the store crate; the net crate is out of scope for this pass.

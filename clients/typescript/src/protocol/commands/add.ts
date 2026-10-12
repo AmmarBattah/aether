@@ -1,0 +1,23 @@
+// Generated from clients/protocol.schema.json by scripts/generate_clients.py.
+// Do not edit: change the Rust types and regenerate.
+
+import type {
+  ApprovalDecision,
+  RuleMatch,
+  RuleScope,
+} from "../../protocol.ts";
+
+
+// Commands. Each builds one frame; the client adds the request id.
+
+export interface AddApprovalRuleCommand {
+  "cmd": "add_approval_rule";
+  "decision": ApprovalDecision;
+  "match": RuleMatch;
+  "note"?: string | null;
+  "scope": RuleScope;
+}
+
+export function addApprovalRule(args: Omit<AddApprovalRuleCommand, "cmd">): AddApprovalRuleCommand {
+  return { cmd: "add_approval_rule", ...args };
+}

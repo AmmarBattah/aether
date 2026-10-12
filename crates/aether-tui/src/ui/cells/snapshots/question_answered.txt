@@ -1,0 +1,24 @@
+── unicode 80 compact
+• researcher asked
+  Should the compactor keep its own fsync?
+── unicode 80 detail
+• researcher asked
+  Should the compactor keep its own fsync?
+── unicode 120 compact
+• researcher asked
+  Should the compactor keep its own fsync?
+── unicode 120 detail
+• researcher asked
+  Should the compactor keep its own fsync?
+── ascii 80 compact
+* researcher asked
+  Should the compactor keep its own fsync?
+── ascii 80 detail
+* researcher asked
+  Should the compactor keep its own fsync?
+── ascii 120 compact
+* researcher asked
+  Should the compactor keep its own fsync?
+── ascii 120 detail
+* researcher asked
+  Should the compactor keep its own fsync?

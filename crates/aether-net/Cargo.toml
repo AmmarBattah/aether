@@ -1,0 +1,18 @@
+[package]
+name = "aether-net"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Shared outbound network-safety boundaries for the Aether agent harness"
+
+[lints]
+workspace = true
+
+[dependencies]
+reqwest = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+url = { workspace = true }

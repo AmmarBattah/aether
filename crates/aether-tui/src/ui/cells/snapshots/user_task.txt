@@ -1,0 +1,32 @@
+── unicode 80 compact
+
+› task from aether · Map the WAL sync path
+
+── unicode 80 detail
+
+› task from aether · Map the WAL sync path
+
+── unicode 120 compact
+
+› task from aether · Map the WAL sync path
+
+── unicode 120 detail
+
+› task from aether · Map the WAL sync path
+
+── ascii 80 compact
+
+> task from aether | Map the WAL sync path
+
+── ascii 80 detail
+
+> task from aether | Map the WAL sync path
+
+── ascii 120 compact
+
+> task from aether | Map the WAL sync path
+
+── ascii 120 detail
+
+> task from aether | Map the WAL sync path
+

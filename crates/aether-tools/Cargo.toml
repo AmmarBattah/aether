@@ -1,0 +1,42 @@
+[package]
+name = "aether-tools"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Built-in tools, shell backends and MCP integration for the Aether agent harness"
+
+[lints]
+workspace = true
+
+[dependencies]
+aether-core = { workspace = true }
+aether-net = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+async-trait = { workspace = true }
+globset = { workspace = true }
+ignore = { workspace = true }
+similar = { workspace = true }
+regex = "1.13.1"
+nix = { workspace = true, features = ["fs", "dir"] }
+rand = { workspace = true }
+reqwest = { workspace = true }
+encoding_rs = "0.8.35"
+mime = "0.3.17"
+url = { workspace = true }
+tempfile = { workspace = true }
+pty-process = { version = "0.5.3", features = ["async"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix = { version = "1.1.4", features = ["process"] }
+
+[dev-dependencies]
+nix = { workspace = true, features = ["fs"] }

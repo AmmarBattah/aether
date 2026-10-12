@@ -1,0 +1,138 @@
+# Known limitations
+
+This page lists what Aether 1.x does not do, or does not yet do well. It
+separates shipped capabilities from unfinished work. An entry marked
+"(roadmap)" is a larger piece of work that is not part of 1.0; those are
+tracked in the [issue tracker](https://github.com/mengsig/aether/issues).
+
+To report a vulnerability, follow [SECURITY.md](../SECURITY.md) instead of
+opening a public issue.
+
+## Security boundaries
+
+Aether runs agents as your own user. An agent can read and change whatever
+your account can, unless you narrow its scope or run it in a container.
+Nothing below is a sandbox escape by itself: these are places where a setting
+looks like a boundary and is not one.
+
+- **Approvals are permissive by default.** The shipped default (`yolo`)
+  approves every tool call. `--no-yolo` (`approval.default = "ask"`) gates
+  external side effects only: network, web tools and MCP servers. Shell
+  commands and file edits inside an agent's scope never prompt under either
+  default. Approval prompts are not filesystem isolation.
+- **`allowed_paths` does not bound an engine's own shell.** The Git guard that
+  refuses `git stash`, path `checkout`/`restore`, `reset --hard` and `clean`
+  outside an agent's `allowed_paths` runs only in Aether's built-in shell. A
+  Claude Code or Codex agent runs commands through the engine's native Bash
+  tool, which never asks the guard, so a worker sharing a checkout can still
+  discard a sibling's uncommitted edits. More generally, native engine tools do
+  not all pass through Aether's allowed-path guards or resource leases, and can
+  reach other paths when the engine's own permissions allow it.
+- **Commands run by Codex can read provider credentials.** Aether hides
+  configured provider credential variables from its built-in tools, from MCP
+  servers and from the Codex loopback exec-server. The Codex app-server keeps
+  those variables for its own model calls. On Codex 0.162.0 or newer Aether
+  adds filters that keep them out of native commands, but the filter is skipped,
+  with a visible notice, when the Codex configuration already sets
+  `shell_environment_policy.exclude` or `include_only`, when the configuration
+  cannot be inspected, and on older or unknown versions. The `codex exec`
+  fallback adds no filter at all. Environment filtering is not credential
+  isolation in any case: an unsandboxed turn can read the environment and
+  files of other processes of the same user. See
+  [Codex credentials and trust boundary](engines.md#codex-credentials-and-trust-boundary).
+- **The shell Git guard is a guardrail, not a parser or a sandbox.** Common
+  launch prefixes are recognized, but arbitrary wrappers (`eval`,
+  `bash -c "git stash"`, a script, an alias) are not, and input typed into a
+  `tty` session with `write_stdin` is not inspected.
+- **Workspaces are shared unless you isolate them.** The default shared
+  workspace does not separate concurrent edits. An isolated Git worktree
+  separates ordinary file edits, but is not a security boundary for native
+  tools. Inspect a child's result and integrate it deliberately.
+- **The container backend covers Aether's shell calls only**, not the whole
+  tool surface and not the native CLI engines. Isolated delegation requires
+  the host backend because a linked Git worktree's metadata is outside the
+  container's workspace mount.
+- **Remote TCP access has no built-in TLS.** Use an SSH tunnel; do not expose
+  a daemon to an untrusted network.
+- **The GitHub watcher turns repository text into agent work.** Who may
+  trigger it is decided by repository permission and the allowlists described
+  in the [GitHub watcher guide](github-watcher.md); the text itself is
+  untrusted input to a model. Do not point the watcher at a privileged
+  workspace.
+
+## Files
+
+- `read_file` and `edit_file` accept files up to 8 MiB; larger files return a
+  size-limit error even when a read requests a small line window. `edit_file`
+  requires valid UTF-8 and bounds the replacement size as well.
+- File writes sync a sibling temporary file, preserve the target mode, and
+  replace its inode atomically. Other hard links retain the old contents;
+  in-scope symlink aliases resolve to the target before replacement.
+  Replacement changes owner/group to those of a newly created file (including
+  a setgid directory's group) and drops ACLs and extended attributes. It needs
+  directory write permission, so a writable file in a non-writable directory
+  or ownership restrictions in a sticky directory can prevent replacement.
+  Bind-mounted targets can reject the rename with `EBUSY` or `EXDEV`.
+- File reads and writes, and the `list_dir`, `glob` and `grep` walkers, open
+  directories component by component without following symlinks, which
+  prevents parent symlink swaps. Private report and export opens reject a
+  final symlink but still follow parent directories. These controls are not a
+  complete hostile-filesystem sandbox. An existing export `.partial` is
+  refused; inspect and remove it to retry.
+
+## Orchestration and visibility
+
+- `wait_for` keeps reported native background jobs attached, but occupies an
+  engine slot. It does not preserve jobs across daemon shutdown/restart or
+  other turn-ending actions such as `delegate(wait=true)` and `ask_user`.
+- Delivery acknowledgment is not answer/compliance verification. Steering a
+  running child across restarts and providers is only partly verified
+  (roadmap).
+- After a direct user message, `wait_for` requires visible assistant text in
+  the active turn. If the daemon crashes after consuming that message but
+  before a reply, the in-memory requirement is lost on restart; the runtime
+  also cannot judge whether the text actually answers the question.
+- If the TUI disconnects during a new agent's model patch, its initial
+  messages stay held until `/model` is retried after reconnecting. A later
+  queued choice can still appear in the picker as the latest choice even
+  though no retry is in flight; the disconnect notice gives the retry step.
+- The agent scheduling tool cannot create schedules that spawn a fresh agent;
+  the CLI can (roadmap).
+- A per-agent view of Git commits with their provenance is not shipped
+  (roadmap).
+- A background PTY shell has been seen to ignore Ctrl-C on a heavily
+  oversubscribed host (roadmap).
+
+## Measurement and compatibility
+
+- Native tools, effort support, model access, and protocol capabilities depend
+  on installed CLIs/accounts. Discovery is not a guarantee that a provider
+  will accept every request (roadmap).
+- The published benchmark reports do not establish universal accuracy, cost,
+  or latency parity. Evaluation on real repositories and under repeated
+  compaction remains open (roadmap).
+- Agent waits avoid model polling, but the daemon/UI still perform periodic
+  housekeeping. Process measurements do not establish literal zero idle CPU
+  or a no-timers guarantee (roadmap).
+- Cost displays are reported/estimated API equivalents, not subscription bills.
+  Unknown cost is not zero cost or a reliable dollar-budget guarantee.
+- Retention is not a full disk quota. Native sessions, backups, and workspaces
+  have separate lifecycles.
+
+## Platforms
+
+Aether supports Linux and macOS. Native Windows is not supported: the daemon
+and its clients talk over Unix sockets, and the process runners rely on Unix
+process groups. Continuous integration runs on Linux for every change; the
+macOS job runs on request (see [CI](ci.md)), so macOS is checked less often.
+
+Native CLI protocols, model capabilities and the stronger forms of native
+isolation depend on the installed engine version and the platform; see
+[engine behavior](engines.md).
+
+## Voice
+
+- Local voice is opt-in. Its automated tests use fake local processes, never a
+  real microphone, speakers or downloaded model, so real audio hardware,
+  latency and output-device routing are unverified on any given machine. See
+  [limits, privacy and verification](voice.md#limits-privacy-and-verification).

@@ -1,0 +1,36 @@
+── unicode 80 compact
+• Ran cargo build (exit 101)
+  └ error[E0308]: mismatched types
+    error: could not compile `aether-store`
+── unicode 80 detail
+• Ran cargo build (exit 101)
+  └ error[E0308]: mismatched types
+    error: could not compile `aether-store`
+    ✗ exit 101 • 8.3s
+── unicode 120 compact
+• Ran cargo build (exit 101)
+  └ error[E0308]: mismatched types
+    error: could not compile `aether-store`
+── unicode 120 detail
+• Ran cargo build (exit 101)
+  └ error[E0308]: mismatched types
+    error: could not compile `aether-store`
+    ✗ exit 101 • 8.3s
+── ascii 80 compact
+* Ran cargo build (exit 101)
+  \ error[E0308]: mismatched types
+    error: could not compile `aether-store`
+── ascii 80 detail
+* Ran cargo build (exit 101)
+  \ error[E0308]: mismatched types
+    error: could not compile `aether-store`
+    x exit 101 * 8.3s
+── ascii 120 compact
+* Ran cargo build (exit 101)
+  \ error[E0308]: mismatched types
+    error: could not compile `aether-store`
+── ascii 120 detail
+* Ran cargo build (exit 101)
+  \ error[E0308]: mismatched types
+    error: could not compile `aether-store`
+    x exit 101 * 8.3s

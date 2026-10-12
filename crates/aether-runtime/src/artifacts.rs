@@ -1,0 +1,314 @@
+//! Artifact storage for tools: bytes go to the store, the record becomes an event.
+
+use std::sync::Arc;
+
+use aether_core::artifact::{Artifact, ArtifactKind};
+use aether_core::event::{Actor, EventDraft, EventKind};
+use aether_core::id::{AgentId, ArtifactId, RunId, TaskId};
+use aether_core::time::now;
+use aether_store::{Commit, Mutation, StagedArtifact};
+use aether_tools::{ArtifactSink, ToolError};
+
+use crate::Runtime;
+
+pub struct StoreArtifactSink {
+    pub runtime: Arc<Runtime>,
+}
+
+impl std::fmt::Debug for StoreArtifactSink {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("StoreArtifactSink")
+    }
+}
+
+#[async_trait::async_trait]
+impl ArtifactSink for StoreArtifactSink {
+    async fn store(
+        &self,
+        kind: ArtifactKind,
+        name: &str,
+        summary: &str,
+        content_type: Option<&str>,
+        bytes: Vec<u8>,
+        ctx_agent: AgentId,
+        ctx_task: Option<TaskId>,
+    ) -> Result<Artifact, ToolError> {
+        self.runtime
+            .publish_artifact(
+                ArtifactPublication {
+                    kind,
+                    name: name.into(),
+                    summary: summary.into(),
+                    content_type: content_type.map(str::to_owned),
+                    bytes,
+                    agent: ctx_agent,
+                    task: ctx_task,
+                },
+                Actor::agent(ctx_agent),
+            )
+            .await
+    }
+
+    async fn store_file(
+        &self,
+        kind: ArtifactKind,
+        name: &str,
+        summary: &str,
+        content_type: Option<&str>,
+        source: &std::path::Path,
+        ctx_agent: AgentId,
+        ctx_task: Option<TaskId>,
+    ) -> Result<Artifact, ToolError> {
+        let runtime = self.runtime.clone();
+        let source = source.to_path_buf();
+        let name = name.to_owned();
+        let summary = summary.to_owned();
+        let content_type = content_type.map(str::to_owned);
+        tokio::task::spawn_blocking(move || {
+            let _hold = runtime.artifact_lock.blocking_lock();
+            let run = run_of(&runtime, ctx_agent)?;
+            let id = ArtifactId::new();
+            let imported = runtime
+                .store
+                .import_artifact_file(id, &source)
+                .map_err(|e| ToolError::Internal(e.to_string()))?;
+            let artifact = Artifact {
+                id,
+                kind,
+                name,
+                path: Some(imported.path),
+                summary,
+                size_bytes: imported.size_bytes,
+                content_type,
+                digest: Some(imported.digest.clone()),
+                created_by: Actor::agent(ctx_agent),
+                agent_id: Some(ctx_agent),
+                task_id: ctx_task,
+                created_at: now(),
+                evicted_at: None,
+            };
+            let event = match imported.shared_with {
+                Some(shared_with) => EventKind::ArtifactDeduplicated {
+                    artifact: id,
+                    shared_with: Some(shared_with),
+                    digest: imported.digest,
+                },
+                None => EventKind::ArtifactCreated {
+                    artifact: artifact.clone(),
+                },
+            };
+            let mut draft = EventDraft::new(Actor::agent(ctx_agent), event).agent(ctx_agent);
+            draft.task_id = ctx_task;
+            draft.run = run;
+            commit_artifact(&runtime, artifact, draft, imported.publication)
+        })
+        .await
+        .map_err(|e| ToolError::Internal(e.to_string()))?
+    }
+}
+
+/// Payload and association for an artifact produced by a tool or client.
+#[derive(Debug)]
+pub struct ArtifactPublication {
+    pub kind: ArtifactKind,
+    pub name: String,
+    pub summary: String,
+    pub content_type: Option<String>,
+    pub bytes: Vec<u8>,
+    pub agent: AgentId,
+    pub task: Option<TaskId>,
+}
+
+impl Runtime {
+    pub async fn publish_artifact(
+        &self,
+        publication: ArtifactPublication,
+        by: Actor,
+    ) -> Result<Artifact, ToolError> {
+        let ArtifactPublication {
+            kind,
+            name,
+            summary,
+            content_type,
+            bytes,
+            agent: ctx_agent,
+            task: ctx_task,
+        } = publication;
+        let run = run_of(self, ctx_agent)?;
+        let digest = {
+            use sha2::Digest as _;
+            hex::encode(sha2::Sha256::digest(&bytes))
+        };
+        // The same content is stored once, but every producing call gets its
+        // own record: a task's result must list what that task produced, and
+        // the payload must age by the newest reference, not the oldest twin.
+        let hold = self.artifact_lock.lock().await;
+        if let Some(twin) = self
+            .store
+            .artifact_by_digest(&digest)
+            .map_err(|e| ToolError::Internal(e.to_string()))?
+            && let Some(path) = twin.path.clone()
+            && self
+                .store
+                .artifact_bytes_exist(twin.id)
+                .map_err(|e| ToolError::Internal(e.to_string()))?
+        {
+            let artifact = Artifact {
+                id: ArtifactId::new(),
+                kind,
+                name: name.to_owned(),
+                path: Some(path),
+                summary: summary.to_owned(),
+                size_bytes: bytes.len() as u64,
+                content_type: content_type.clone(),
+                digest: Some(digest.clone()),
+                created_by: by.clone(),
+                agent_id: Some(ctx_agent),
+                task_id: ctx_task,
+                created_at: now(),
+                evicted_at: None,
+            };
+            let mut draft = EventDraft::new(
+                by.clone(),
+                EventKind::ArtifactDeduplicated {
+                    artifact: artifact.id,
+                    shared_with: Some(twin.id),
+                    digest,
+                },
+            )
+            .agent(ctx_agent);
+            draft.task_id = ctx_task;
+            draft.run = run;
+            return commit_artifact(self, artifact, draft, None);
+        }
+        drop(hold);
+        let id = ArtifactId::new();
+        let size = bytes.len() as u64;
+        let store = self.store.clone();
+        let publication =
+            tokio::task::spawn_blocking(move || store.stage_artifact_bytes(id, &bytes))
+                .await
+                .map_err(|e| ToolError::Internal(e.to_string()))?
+                .map_err(|e| ToolError::Internal(e.to_string()))?;
+        let _hold = self.artifact_lock.lock().await;
+        let artifact = Artifact {
+            id,
+            kind,
+            name: name.to_owned(),
+            path: Some(publication.path.clone()),
+            summary: summary.to_owned(),
+            size_bytes: size,
+            content_type: content_type.clone(),
+            digest: Some(digest),
+            created_by: by.clone(),
+            agent_id: Some(ctx_agent),
+            task_id: ctx_task,
+            created_at: now(),
+            evicted_at: None,
+        };
+        let mut draft = EventDraft::new(
+            by.clone(),
+            EventKind::ArtifactCreated {
+                artifact: artifact.clone(),
+            },
+        )
+        .agent(ctx_agent);
+        draft.task_id = ctx_task;
+        draft.run = run;
+        commit_artifact(self, artifact, draft, Some(publication))
+    }
+}
+
+fn commit_artifact(
+    runtime: &Runtime,
+    artifact: Artifact,
+    draft: EventDraft,
+    publication: Option<StagedArtifact>,
+) -> Result<Artifact, ToolError> {
+    if let Err(error) = runtime.apply(
+        Commit::new()
+            .event(draft)
+            .mutate(Mutation::PutArtifact(artifact.clone())),
+    ) {
+        if publication.is_some()
+            && let Err(cleanup) = runtime
+                .store
+                .remove_unreferenced_artifact_bytes(artifact.id)
+        {
+            return Err(ToolError::Internal(format!(
+                "{error}; cleaning unpublished artifact {} also failed: {cleanup}",
+                artifact.id
+            )));
+        }
+        return Err(ToolError::Internal(error.to_string()));
+    }
+    if let Some(publication) = publication
+        && let Err(error) = runtime.store.finish_artifact_publication(&publication)
+    {
+        tracing::warn!(artifact = %artifact.id, %error,
+            "artifact payload promotion failed; will retry on next open");
+    }
+    Ok(artifact)
+}
+
+/// The run an artifact belongs to. Without it the artifact's event sits
+/// outside the run's log, and a report or an export of that run cannot see
+/// what the run produced.
+fn run_of(runtime: &Runtime, agent: AgentId) -> Result<Option<RunId>, ToolError> {
+    Ok(runtime
+        .store
+        .agent(agent)
+        .map_err(|e| ToolError::Internal(e.to_string()))?
+        .map(|a| a.run))
+}
+
+impl Runtime {
+    /// Drop the bytes of artifacts the retention policy no longer keeps. The
+    /// records stay, so an old task's report still names what it produced and
+    /// says the payload is gone. Returns how many were evicted.
+    pub fn sweep_artifacts(&self) -> crate::Result<usize> {
+        let policy = self.config.retention;
+        if policy == aether_core::artifact::RetentionPolicy::keep_everything() {
+            return Ok(0);
+        }
+        // Startup calls this synchronous API from Tokio, where blocking_lock would panic.
+        let _hold = futures::executor::block_on(self.artifact_lock.lock());
+        let live = self.store.live_artifacts()?;
+        let at = now();
+        let doomed: Vec<(ArtifactId, u64, Option<AgentId>)> = policy
+            .evictable(&live, at)
+            .into_iter()
+            .map(|a| (a.id, a.size_bytes, a.agent_id))
+            .collect();
+        for (id, size_bytes, agent) in &doomed {
+            self.store.evict_artifact_bytes(*id)?;
+            // On the run's log, so a report of that run still says the
+            // payload is gone rather than losing the record of it.
+            let run = match agent {
+                Some(a) => self.store.agent(*a)?.map(|a| a.run),
+                None => None,
+            };
+            let mut draft = EventDraft::new(
+                Actor::System,
+                EventKind::ArtifactEvicted {
+                    artifact: *id,
+                    size_bytes: *size_bytes,
+                    reason: describe_policy(&policy),
+                },
+            );
+            draft.agent_id = *agent;
+            draft.run = run;
+            self.apply(Commit::new().event(draft))?;
+        }
+        Ok(doomed.len())
+    }
+}
+
+fn describe_policy(policy: &aether_core::artifact::RetentionPolicy) -> String {
+    match (policy.max_age_days, policy.max_total_bytes) {
+        (Some(days), Some(bytes)) => format!("retention: {days} days, {bytes} bytes"),
+        (Some(days), None) => format!("retention: {days} days"),
+        (None, Some(bytes)) => format!("retention: {bytes} bytes"),
+        (None, None) => "retention".into(),
+    }
+}

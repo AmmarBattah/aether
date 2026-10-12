@@ -1,0 +1,16 @@
+── unicode 80 compact
+• Compacted context · 182.0k → 31.0k tokens
+── unicode 80 detail
+• Compacted context · 182.0k → 31.0k tokens
+── unicode 120 compact
+• Compacted context · 182.0k → 31.0k tokens
+── unicode 120 detail
+• Compacted context · 182.0k → 31.0k tokens
+── ascii 80 compact
+* Compacted context | 182.0k -> 31.0k tokens
+── ascii 80 detail
+* Compacted context | 182.0k -> 31.0k tokens
+── ascii 120 compact
+* Compacted context | 182.0k -> 31.0k tokens
+── ascii 120 detail
+* Compacted context | 182.0k -> 31.0k tokens

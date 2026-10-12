@@ -1,0 +1,94 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "1.0.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/mengsig/aether"
+rust-version = "1.90"
+# Installed from this repository, not from crates.io.
+publish = false
+
+[workspace.dependencies]
+aether-core = { path = "crates/aether-core" }
+aether-store = { path = "crates/aether-store" }
+aether-model = { path = "crates/aether-model" }
+aether-tools = { path = "crates/aether-tools" }
+aether-context = { path = "crates/aether-context" }
+aether-memory = { path = "crates/aether-memory" }
+aether-net = { path = "crates/aether-net" }
+aether-runtime = { path = "crates/aether-runtime" }
+aether-protocol = { path = "crates/aether-protocol" }
+aether-client = { path = "crates/aether-client" }
+aether-engine = { path = "crates/aether-engine" }
+aether-daemon = { path = "crates/aether-daemon" }
+aether-tui = { path = "crates/aether-tui" }
+
+anyhow = "1.0.104"
+async-trait = "0.1.92"
+base64 = "0.23.1"
+bytes = "1.12.1"
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "serde", "std"] }
+clap = { version = "4.6.6", features = ["derive", "env"] }
+crossterm = { version = "0.29.0", features = ["event-stream"] }
+dirs = "7.0.0"
+fs4 = "1.1.0"
+futures = "0.3.34"
+globset = "0.4.20"
+hex = "0.4.3"
+hmac = "0.13.0"
+http-body-util = "0.1.5"
+hyper = { version = "1.11.1", features = ["server", "http1"] }
+hyper-util = { version = "0.1.20", features = ["tokio"] }
+ignore = "0.4.33"
+indexmap = { version = "2.14.2", features = ["serde"] }
+nix = { version = "0.31.3", features = ["signal", "process", "user"] }
+open = "5.4.3"
+parking_lot = "0.12.5"
+pretty_assertions = "1.4.1"
+rand = "0.10.2"
+ratatui = "0.30.2"
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "stream", "rustls", "charset", "http2"] }
+rusqlite = { version = "0.40.2", features = ["bundled", "backup"] }
+same-file = "1.0.6"
+schemars = { version = "1.2.2", features = ["chrono04"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+sha1 = "0.11.0"
+sha2 = "0.11.0"
+similar = "3.2.0"
+subtle = { version = "2.6.1", default-features = false }
+tempfile = "3.27.0"
+textwrap = "0.16.2"
+thiserror = "2.0.20"
+tokio = { version = "1.53.1", features = ["full"] }
+tokio-stream = { version = "0.1.19", features = ["sync"] }
+tokio-util = { version = "0.7.19", features = ["codec"] }
+toml = "1.1.5"
+tracing = "0.1.44"
+tracing-appender = "0.2.5"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+ulid = { version = "3.0.0", features = ["serde"] }
+unicode-width = "0.2.2"
+unicode-segmentation = "1.13.3"
+url = "2.5.8"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[profile.dev.package."*"]
+opt-level = 2

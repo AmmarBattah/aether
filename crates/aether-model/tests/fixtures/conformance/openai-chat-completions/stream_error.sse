@@ -1,0 +1,4 @@
+data: {"id":"chatcmpl-conformance","model":"gpt-5","choices":[{"index":0,"delta":{"role":"assistant","content":"Half an ans"},"finish_reason":null}]}
+
+data: {"error":{"type":"server_error","message":"An internal error occurred"}}
+
