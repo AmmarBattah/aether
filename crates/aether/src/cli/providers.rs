@@ -1,6 +1,11 @@
 use super::{CancellationToken, ProviderHealth, acted, connect_or_start, sane};
 
-pub async fn login(provider: String, api_key: bool, method: Option<String>) -> anyhow::Result<()> {
+pub async fn login(
+    socket: impl Into<aether_client::Endpoint>,
+    provider: String,
+    api_key: bool,
+    method: Option<String>,
+) -> anyhow::Result<()> {
     use aether_model::LoginMethod;
     use aether_model::auth::interaction::TerminalInteraction;
     let models = aether_model::Models::load(None)?;
@@ -9,13 +14,8 @@ pub async fn login(provider: String, api_key: bool, method: Option<String>) -> a
         .provider(&provider)
         .and_then(|p| p.auth.cli.clone())
     {
-        eprintln!(
-            "{}: {} · handing off to `{} {}`",
-            sane(&provider),
-            sane(&cli.label),
-            sane(&cli.program),
-            sane(&cli.login.join(" "))
-        );
+        run_cli_auth(socket.into(), &provider, cli, false).await?;
+        return Ok(());
     }
     let has_oauth = models.oauth_label(&provider).is_some();
     let login_method = if api_key || !has_oauth {
@@ -39,14 +39,65 @@ pub async fn login(provider: String, api_key: bool, method: Option<String>) -> a
     Ok(())
 }
 
-pub async fn logout(provider: String, json: bool) -> anyhow::Result<()> {
+pub async fn logout(
+    socket: impl Into<aether_client::Endpoint>,
+    provider: String,
+    json: bool,
+) -> anyhow::Result<()> {
     let models = aether_model::Models::load(None)?;
-    models.logout(&provider).await?;
+    if let Some(cli) = models
+        .registry()
+        .provider(&provider)
+        .and_then(|p| p.auth.cli.clone())
+    {
+        run_cli_auth(socket.into(), &provider, cli, true).await?;
+    } else {
+        models.logout(&provider).await?;
+    }
     acted(
         json,
         &format!("removed credentials for {provider}"),
         serde_json::json!({"provider": provider, "removed": true}),
     )
+}
+
+async fn run_cli_auth(
+    socket: aether_client::Endpoint,
+    provider: &str,
+    mut cli: aether_model::auth::CliAuth,
+    logout: bool,
+) -> anyhow::Result<()> {
+    let client = connect_or_start(&socket).await?;
+    let rows = client.auth_status().await?;
+    let info = rows
+        .iter()
+        .find(|info| info.provider == provider)
+        .ok_or_else(|| anyhow::anyhow!("daemon does not report provider {provider}"))?;
+    if let Some(program) = &info.program {
+        anyhow::ensure!(!program.is_empty(), "daemon reported an empty CLI program");
+        cli.program = program.clone();
+    } else if let Some(program) = cli.status().await.program {
+        cli.program = program;
+    }
+    let args = if logout { &cli.logout } else { &cli.login };
+    eprintln!(
+        "{}: {} · handing off to `{} {}`",
+        sane(provider),
+        sane(&cli.label),
+        sane(&cli.program),
+        sane(&args.join(" "))
+    );
+    if logout {
+        cli.logout().await?;
+    } else {
+        cli.login().await?;
+    }
+    let refreshed = client.auth_status().await?;
+    anyhow::ensure!(
+        refreshed.iter().any(|info| info.provider == provider),
+        "daemon stopped reporting provider {provider} after authentication"
+    );
+    Ok(())
 }
 
 pub async fn auth(socket: impl Into<aether_client::Endpoint>, json: bool) -> anyhow::Result<()> {
@@ -75,8 +126,15 @@ pub async fn auth(socket: impl Into<aether_client::Endpoint>, json: bool) -> any
                 ""
             }
         );
+        if let Some(detail) = auth_detail(&r) {
+            println!("  {}", sane(detail));
+        }
     }
     Ok(())
+}
+
+fn auth_detail(info: &aether_protocol::AuthInfo) -> Option<&str> {
+    info.detail.as_deref().filter(|_| !info.configured)
 }
 
 pub async fn models(socket: impl Into<aether_client::Endpoint>, json: bool) -> anyhow::Result<()> {
@@ -190,7 +248,7 @@ pub async fn providers(
 
 #[cfg(test)]
 mod tests {
-    use super::model_cost_label;
+    use super::{auth_detail, model_cost_label};
     use aether_core::model::{ModelCost, ModelCostTier};
 
     #[test]
@@ -215,5 +273,24 @@ mod tests {
             model_cost_label(Some(cost)),
             "$0.1/$0.5 (>100001: $0.5/$2.5)"
         );
+    }
+    #[test]
+    fn auth_table_and_json_preserve_cli_failure_detail() {
+        let mut info = aether_protocol::AuthInfo {
+            provider: "claude-code".into(),
+            provider_name: "Claude Code".into(),
+            configured: false,
+            source: None,
+            methods: vec!["cli".into()],
+            subscription: false,
+            detail: Some("/second/claude: status timed out".into()),
+            program: Some("/second/claude".into()),
+        };
+        assert_eq!(auth_detail(&info), Some("/second/claude: status timed out"));
+        let json = serde_json::to_value(&info).expect("auth JSON");
+        assert_eq!(json["program"], "/second/claude");
+        assert_eq!(json["detail"], "/second/claude: status timed out");
+        info.configured = true;
+        assert_eq!(auth_detail(&info), None);
     }
 }

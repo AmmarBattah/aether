@@ -178,7 +178,7 @@ pub(super) async fn compaction_client(
     model: &ModelRef,
 ) -> Result<Arc<dyn aether_model::ModelClient>> {
     let resolved = runtime.models.resolve(model)?;
-    let Some(kind) = crate::turn_engine::engine_kind(resolved.provider.protocol) else {
+    let Some(_kind) = crate::turn_engine::engine_kind(resolved.provider.protocol) else {
         return Ok(runtime.models.client(model).await?);
     };
     if ctx.agent.scope.backend != aether_core::agent::ExecutionBackend::Host {
@@ -188,10 +188,9 @@ pub(super) async fn compaction_client(
         ));
     }
     let engine = runtime
-        .engines
-        .get(&kind)
-        .cloned()
-        .ok_or_else(|| RuntimeError::Invalid(format!("{} is not installed", kind.as_str())))?;
+        .provider_engine(&resolved.provider)
+        .await
+        .map_err(|error| RuntimeError::Invalid(error.to_string()))?;
     let tool_ctx = tool_context(runtime, ctx);
     Ok(Arc::new(crate::compaction_client::CompactionClient {
         engine,

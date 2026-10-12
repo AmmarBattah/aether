@@ -68,7 +68,7 @@ impl Check {
         }
     }
 
-    fn warn(name: &str, detail: impl Into<String>, fix: impl Into<String>) -> Self {
+    pub(crate) fn warn(name: &str, detail: impl Into<String>, fix: impl Into<String>) -> Self {
         Self {
             name: name.into(),
             level: Level::Warn,
@@ -490,6 +490,39 @@ pub enum EngineStatus {
     /// Did not register at all - not installed, too old for a floor that
     /// *is* a registration gate, unparsable output, or a missing capability.
     Unavailable(String),
+}
+
+pub fn check_cli_installs(installs: &[(String, Vec<std::path::PathBuf>, Option<String>)]) -> Check {
+    let duplicates: Vec<_> = installs
+        .iter()
+        .filter(|(_, paths, _)| paths.len() > 1)
+        .map(|(provider, paths, used)| {
+            assert!(
+                paths.iter().all(|path| path.is_absolute()),
+                "install paths must be absolute"
+            );
+            let unique: std::collections::HashSet<_> = paths.iter().collect();
+            assert_eq!(unique.len(), paths.len(), "install paths must be distinct");
+            format!(
+                "{provider}: {}; Aether uses {}",
+                paths
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                used.as_deref()
+                    .unwrap_or("none (daemon reports no install)")
+            )
+        })
+        .collect();
+    if duplicates.is_empty() {
+        return Check::ok("cli-installs", "no duplicate CLI installs found");
+    }
+    Check::warn(
+        "cli-installs",
+        duplicates.join(" · "),
+        "use the path reported by `aether auth --json` when checking CLI login; set an explicit auth.cli.program in providers.toml to pin an install",
+    )
 }
 
 /// The engine CLIs on this machine, and whether they are signed in.

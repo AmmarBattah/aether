@@ -5,12 +5,19 @@
 //! for these providers also runs through the CLI (see the engine crate).
 
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+use std::path::PathBuf;
+
+use futures::stream::{FuturesOrdered, StreamExt};
+
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
 use crate::auth::types::AuthError;
+
+mod discovery;
+pub use discovery::discover_programs;
 
 /// Status and login commands of a credential-owning CLI.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -34,6 +41,8 @@ pub struct CliStatus {
     /// The program exists and answered.
     pub available: bool,
     pub logged_in: bool,
+    /// Selected install, or the first candidate to use for login.
+    pub program: Option<String>,
     /// One line of detail for the UI.
     pub detail: String,
 }
@@ -42,51 +51,170 @@ const CACHE_TTL: Duration = Duration::from_secs(30);
 /// "Not logged in" is re-checked quickly so a login just completed shows up.
 const NEGATIVE_CACHE_TTL: Duration = Duration::from_secs(3);
 
-fn cache() -> &'static Mutex<HashMap<String, (Instant, CliStatus)>> {
-    static CACHE: OnceLock<Mutex<HashMap<String, (Instant, CliStatus)>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+#[derive(Default)]
+struct ProbeCache {
+    statuses: HashMap<String, (Instant, CliStatus)>,
+    generation: Arc<()>,
+}
+
+fn cache() -> &'static Mutex<ProbeCache> {
+    static CACHE: OnceLock<Mutex<ProbeCache>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(ProbeCache::default()))
+}
+
+fn lock_cache() -> MutexGuard<'static, ProbeCache> {
+    cache().lock().unwrap_or_else(|error| {
+        let mut guard = error.into_inner();
+        guard.statuses.clear();
+        guard.generation = Arc::new(());
+        cache().clear_poison();
+        tracing::error!("CLI auth cache poisoned; discarded cached probes");
+        guard
+    })
 }
 
 impl CliAuth {
-    fn cache_key(&self) -> String {
-        format!("{} {}", self.program, self.status.join(" "))
+    pub fn candidates(&self) -> Vec<PathBuf> {
+        discover_programs(
+            &self.program,
+            std::env::var_os("PATH").as_deref(),
+            dirs::home_dir().as_deref(),
+        )
     }
 
-    /// Ask the CLI whether it is logged in. Cached briefly: callers such as
-    /// model listings ask often and the CLI takes a moment to answer.
+    fn cache_key(&self, candidates: &[PathBuf]) -> String {
+        format!(
+            "{:?} {:?} {:?} {:?}",
+            self.program, candidates, self.status, self.logged_in_markers
+        )
+    }
+
+    /// Cached briefly for model listings; explicit AuthStatus requests invalidate it.
     pub async fn status(&self) -> CliStatus {
-        let key = self.cache_key();
-        if let Ok(cache) = cache().lock()
-            && let Some((at, status)) = cache.get(&key)
+        self.status_on(self.candidates()).await
+    }
+
+    async fn status_on(&self, candidates: Vec<PathBuf>) -> CliStatus {
+        if self.program.trim().is_empty()
+            || self.logged_in_markers.is_empty()
+            || self.logged_in_markers.iter().any(String::is_empty)
         {
-            let ttl = if status.logged_in {
-                CACHE_TTL
-            } else {
-                NEGATIVE_CACHE_TTL
+            return CliStatus {
+                available: false,
+                logged_in: false,
+                program: None,
+                detail:
+                    "invalid CLI auth configuration: program and login markers must be nonempty"
+                        .into(),
             };
-            if at.elapsed() < ttl {
-                return status.clone();
-            }
         }
-        let status = self.status_uncached().await;
-        if let Ok(mut cache) = cache().lock() {
-            cache.insert(key, (Instant::now(), status.clone()));
+        let key = self.cache_key(&candidates);
+        let generation = {
+            let cache = lock_cache();
+            if let Some((at, status)) = cache.statuses.get(&key) {
+                let ttl = if status.logged_in {
+                    CACHE_TTL
+                } else {
+                    NEGATIVE_CACHE_TTL
+                };
+                if at.elapsed() < ttl {
+                    return status.clone();
+                }
+            }
+            cache.generation.clone()
+        };
+        let status = self
+            .probe_candidates(candidates, Duration::from_secs(15))
+            .await;
+        assert!(
+            !status.logged_in || status.available,
+            "logged-in CLI must be available"
+        );
+        assert!(
+            !status.logged_in || status.program.is_some(),
+            "logged-in CLI must have a selected path"
+        );
+        let mut cache = lock_cache();
+        if Arc::ptr_eq(&cache.generation, &generation) {
+            cache.statuses.insert(key, (Instant::now(), status.clone()));
         }
         status
     }
 
+    #[cfg(test)]
     async fn status_uncached(&self) -> CliStatus {
+        self.probe_candidates(self.candidates(), Duration::from_secs(15))
+            .await
+    }
+
+    async fn probe_candidates(&self, candidates: Vec<PathBuf>, timeout: Duration) -> CliStatus {
+        assert!(!timeout.is_zero(), "probe timeout must be positive");
+        assert!(!self.program.is_empty(), "CLI program must be configured");
+        let mut probes: FuturesOrdered<_> = candidates
+            .iter()
+            .map(|path| self.probe(path, timeout))
+            .collect();
+        let mut failed = Vec::new();
+        let mut available = false;
+        let mut program = None;
+        while let Some(status) = probes.next().await {
+            if status.logged_in {
+                return status;
+            }
+            available |= status.available;
+            if program.is_none() {
+                program = status.program;
+            }
+            failed.push(status.detail);
+        }
+        let detail = if failed.is_empty() {
+            format!("{} not found in PATH, ~/.local/bin or ~/bin", self.program)
+        } else {
+            let suffix = if failed.len() > 1 {
+                " (other installs exist)"
+            } else {
+                ""
+            };
+            format!("{}{suffix}", failed.join("; "))
+        };
+        CliStatus {
+            available,
+            logged_in: false,
+            program,
+            detail: detail.replace(['\n', '\r'], " "),
+        }
+    }
+
+    async fn probe(&self, path: &std::path::Path, timeout: Duration) -> CliStatus {
+        assert!(!path.as_os_str().is_empty(), "probe path cannot be empty");
+        assert!(
+            !self.logged_in_markers.is_empty(),
+            "CLI login markers must be configured"
+        );
+        let program = match std::path::absolute(path) {
+            Ok(program) => program.to_string_lossy().into_owned(),
+            Err(error) => {
+                return CliStatus {
+                    available: false,
+                    logged_in: false,
+                    program: None,
+                    detail: format!(
+                        "{}: could not resolve program path ({error})",
+                        path.display()
+                    ),
+                };
+            }
+        };
         let output = tokio::time::timeout(
-            Duration::from_secs(15),
-            tokio::process::Command::new(&self.program)
+            timeout,
+            tokio::process::Command::new(path)
                 .args(&self.status)
                 .stdin(std::process::Stdio::null())
-                // A timeout or cancelled caller must not leave the probe running.
                 .kill_on_drop(true)
                 .output(),
         )
         .await;
-        match output {
+        let (available, logged_in, reason) = match output {
             Ok(Ok(out)) => {
                 let text = format!(
                     "{}{}",
@@ -95,30 +223,23 @@ impl CliAuth {
                 );
                 let logged_in =
                     out.status.success() && self.logged_in_markers.iter().any(|m| text.contains(m));
-                let detail = text
-                    .lines()
-                    .map(str::trim)
-                    .find(|l| !l.is_empty())
-                    .unwrap_or("")
-                    .chars()
-                    .take(120)
-                    .collect();
-                CliStatus {
-                    available: true,
-                    logged_in,
-                    detail,
-                }
+                let reason = if !out.status.success() {
+                    format!("non-zero exit ({})", out.status)
+                } else if logged_in {
+                    "logged in".into()
+                } else {
+                    "not logged in".into()
+                };
+                (true, logged_in, reason)
             }
-            Ok(Err(e)) => CliStatus {
-                available: false,
-                logged_in: false,
-                detail: format!("{} not found ({e})", self.program),
-            },
-            Err(_) => CliStatus {
-                available: true,
-                logged_in: false,
-                detail: format!("{} status timed out", self.program),
-            },
+            Ok(Err(e)) => (false, false, format!("not found or could not start ({e})")),
+            Err(_) => (true, false, "status timed out".into()),
+        };
+        CliStatus {
+            available,
+            logged_in,
+            detail: format!("{program}: {reason}").replace(['\n', '\r'], " "),
+            program: Some(program),
         }
     }
 
@@ -162,11 +283,16 @@ impl CliAuth {
 
     /// Drop the cached status so the next check reflects a fresh login.
     pub fn forget(&self) {
-        if let Ok(mut cache) = cache().lock() {
-            cache.remove(&self.cache_key());
-        }
+        let mut cache = lock_cache();
+        cache.generation = Arc::new(());
+        let prefix = format!("{:?} ", self.program);
+        cache.statuses.retain(|key, _| !key.starts_with(&prefix));
     }
 }
+
+#[cfg(all(test, unix))]
+#[path = "cli/tests.rs"]
+mod install_tests;
 
 #[cfg(test)]
 mod tests {

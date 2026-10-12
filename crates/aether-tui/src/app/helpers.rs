@@ -394,9 +394,11 @@ pub fn install_command(provider: &str) -> Option<&'static str> {
 }
 
 pub fn cli_missing(info: &AuthInfo) -> bool {
-    info.program.is_some()
-        && info
-            .detail
-            .as_deref()
-            .is_some_and(|d| d.contains("not found"))
+    (info.program.is_some() || info.methods.iter().any(|m| m == "cli"))
+        && info.detail.as_deref().is_some_and(|d| {
+            d.contains("not found")
+                && !d.contains("not logged in")
+                && !d.contains("timed out")
+                && !d.contains("non-zero exit")
+        })
 }

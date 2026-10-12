@@ -65,7 +65,7 @@ impl BottomView for LoginView {
 
 /// A missing CLI cannot be signed into; say how to install it instead.
 fn choose(info: &AuthInfo, theme: &Theme) -> ViewOutcome {
-    if cli_missing(info) {
+    if cli_missing(info) && info.program.is_some() {
         let program = info.program.as_deref().unwrap_or(&info.provider);
         let hint = match install_command(&info.provider) {
             Some(cmd) => format!("{program} is not installed{}run: {cmd}", sep(theme)),
@@ -94,7 +94,10 @@ fn rows(app: &App) -> Vec<(PickerRow, String)> {
 /// Where the provider stands and what Enter would do about it.
 pub(crate) fn status(info: &AuthInfo, theme: &Theme) -> String {
     let dot = sep(theme);
-    if info.methods.iter().all(|m| m == "none") {
+    if info.program.is_none()
+        && !info.methods.is_empty()
+        && info.methods.iter().all(|m| m == "none")
+    {
         return "no sign-in needed".into();
     }
     if info.configured {
@@ -103,9 +106,12 @@ pub(crate) fn status(info: &AuthInfo, theme: &Theme) -> String {
     }
     if cli_missing(info) {
         let how = install_command(&info.provider).unwrap_or("install the CLI first");
-        return format!("not installed{dot}{how}");
+        return format!(
+            "{}{dot}{how}",
+            info.detail.as_deref().unwrap_or("not installed")
+        );
     }
-    let how = if info.program.is_some() {
+    let how = if info.program.is_some() || info.methods.iter().any(|m| m == "cli") {
         "subscription sign-in in the browser"
     } else if info.methods.iter().any(|m| m == "oauth") {
         "sign in in the browser"
@@ -114,5 +120,8 @@ pub(crate) fn status(info: &AuthInfo, theme: &Theme) -> String {
     } else {
         "nothing to do"
     };
-    format!("not signed in{dot}{how}")
+    format!(
+        "{}{dot}{how}",
+        info.detail.as_deref().unwrap_or("not signed in")
+    )
 }

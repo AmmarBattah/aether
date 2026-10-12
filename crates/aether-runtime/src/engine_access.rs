@@ -2,70 +2,134 @@ use crate::{LEAF_WITHHELD_TOOLS, Result, Runtime, RuntimeError, turn_engine};
 use aether_core::id::AgentId;
 use std::{collections::HashMap, sync::Arc};
 
-/// The official CLIs installed on this machine, keyed by engine, plus why
-/// each omitted engine is unusable, keyed the same way. An engine this
-/// machine cannot use is omitted, same as before this preflight; the reason
-/// is logged at `warn` and kept on [`Runtime`] so a turn that reaches it
-/// reports why rather than a generic "not installed".
-pub(super) async fn detect_engines(
-    prompt_cache_ttl: Option<aether_core::model::PromptCacheTtl>,
-) -> (
-    HashMap<aether_engine::EngineKind, Arc<dyn aether_engine::Engine>>,
-    HashMap<aether_engine::EngineKind, String>,
-) {
-    let mut engines: HashMap<aether_engine::EngineKind, Arc<dyn aether_engine::Engine>> =
-        HashMap::new();
-    let mut unavailable: HashMap<aether_engine::EngineKind, String> = HashMap::new();
-    match aether_engine::ClaudeCodeEngine::detect_verbose().await {
-        Ok(e) => {
-            // Usable-with-a-limitation is not unavailable: it
-            // still registers, distinct in the log from a refusal below.
-            if let Some(limitation) = e.limitation() {
-                tracing::warn!(engine = "claude-code", %limitation, "engine usable, with limits");
-            }
-            let e = match prompt_cache_ttl {
-                Some(ttl) => e.with_prompt_cache_ttl(ttl),
-                None => e,
-            };
-            engines.insert(aether_engine::EngineKind::CLAUDE_CODE, Arc::new(e));
-        }
-        Err(reason) => {
-            tracing::warn!(engine = "claude-code", %reason, "engine CLI unusable");
-            unavailable.insert(aether_engine::EngineKind::CLAUDE_CODE, reason.to_string());
-        }
-    }
-    // The app-server protocol gates, steers and interrupts; exec mode is
-    // the fallback for older Codex builds.
-    match aether_engine::CodexAppEngine::detect_verbose().await {
-        Ok(e) => {
-            engines.insert(aether_engine::EngineKind::CODEX, Arc::new(e));
-        }
-        Err(app_reason) => match aether_engine::CodexEngine::detect_verbose().await {
-            Ok(e) => {
-                engines.insert(aether_engine::EngineKind::CODEX, Arc::new(e));
-            }
-            Err(exec_reason) => {
-                tracing::warn!(
-                    engine = "codex",
-                    app_server_reason = %app_reason,
-                    exec_reason = %exec_reason,
-                    "engine CLI unusable"
+pub(super) struct EngineSet {
+    pub by_kind: HashMap<aether_engine::EngineKind, Arc<dyn aether_engine::Engine>>,
+    pub unavailable: HashMap<aether_engine::EngineKind, String>,
+    pub detect_native: bool,
+}
+
+pub(super) async fn detect_engines(models: &aether_model::Models) -> EngineSet {
+    let mut engines = HashMap::new();
+    let mut unavailable = HashMap::new();
+    for provider in models.registry().providers().iter().filter(|p| p.enabled) {
+        let Some(kind) = turn_engine::engine_kind(provider.protocol) else {
+            continue;
+        };
+        let program = match &provider.auth.cli {
+            Some(cli) => cli.status().await.program,
+            None => None,
+        };
+        let Some(program) = program else {
+            unavailable.insert(kind, format!("{} CLI not found", provider.id));
+            continue;
+        };
+        match detect_provider_engine(provider, &program, models.config().model.prompt_cache_ttl)
+            .await
+        {
+            Ok(engine) => {
+                assert_eq!(
+                    engine.kind(),
+                    kind,
+                    "detected engine must match its provider protocol"
                 );
-                // The common case - codex simply absent - fails both probes
-                // with the identical reason; do not repeat it.
-                let reason = if app_reason == exec_reason {
-                    app_reason.to_string()
-                } else {
-                    format!("{app_reason} (legacy exec fallback: {exec_reason})")
-                };
-                unavailable.insert(aether_engine::EngineKind::CODEX, reason);
+                assert!(
+                    !engine.adapter().is_empty(),
+                    "detected engine must identify its adapter"
+                );
+                engines.insert(kind, engine);
             }
-        },
+            Err(reason) => {
+                tracing::warn!(engine = %kind, %reason, "engine CLI unusable");
+                unavailable.insert(kind, reason.to_string());
+            }
+        }
     }
-    (engines, unavailable)
+    EngineSet {
+        by_kind: engines,
+        unavailable,
+        detect_native: true,
+    }
+}
+
+async fn detect_provider_engine(
+    provider: &aether_model::registry::ProviderDef,
+    program: &str,
+    prompt_cache_ttl: Option<aether_core::model::PromptCacheTtl>,
+) -> std::result::Result<Arc<dyn aether_engine::Engine>, aether_engine::EngineError> {
+    use aether_engine::{ClaudeCodeEngine, CodexAppEngine, CodexEngine, EngineError};
+    assert!(!program.is_empty(), "resolved engine path cannot be empty");
+    assert!(
+        provider.protocol.is_engine(),
+        "only engine providers can be detected"
+    );
+    match provider.protocol {
+        aether_model::Protocol::ClaudeCode => {
+            let mut engine = ClaudeCodeEngine::detect_program(program)
+                .await
+                .map_err(|e| EngineError::Unsupported(e.to_string()))?;
+            if let Some(ttl) = prompt_cache_ttl {
+                engine = engine.with_prompt_cache_ttl(ttl);
+            }
+            if let Some(limitation) = engine.limitation() {
+                tracing::warn!(%program, %limitation, "engine usable, with limits");
+            }
+            Ok(Arc::new(engine))
+        }
+        aether_model::Protocol::Codex => match CodexAppEngine::detect_program(program).await {
+            Ok(engine) => Ok(Arc::new(engine)),
+            Err(app_reason) => CodexEngine::detect_program(program)
+                .await
+                .map(|engine| Arc::new(engine) as Arc<dyn aether_engine::Engine>)
+                .map_err(|exec_reason| {
+                    EngineError::Unsupported(format!(
+                        "{app_reason} (legacy exec fallback: {exec_reason})"
+                    ))
+                }),
+        },
+        _ => unreachable!("validated engine protocol"),
+    }
 }
 
 impl Runtime {
+    pub(crate) async fn provider_engine(
+        &self,
+        provider: &aether_model::registry::ProviderDef,
+    ) -> std::result::Result<Arc<dyn aether_engine::Engine>, aether_engine::EngineError> {
+        let kind = turn_engine::engine_kind(provider.protocol).ok_or_else(|| {
+            aether_engine::EngineError::Unsupported("provider is not an engine".into())
+        })?;
+        if !self.detect_native_engines {
+            return self.engines.get(&kind).cloned().ok_or_else(|| {
+                aether_engine::EngineError::Unsupported(
+                    self.engine_unavailable
+                        .get(&kind)
+                        .cloned()
+                        .unwrap_or_else(|| format!("{kind} engine is unavailable")),
+                )
+            });
+        }
+        assert!(provider.enabled, "disabled engine provider must not run");
+        let cli = provider.auth.cli.as_ref().ok_or_else(|| {
+            aether_engine::EngineError::Unsupported("native engine needs CLI auth".into())
+        })?;
+        let status = cli.status().await;
+        let program = status
+            .program
+            .ok_or(aether_engine::EngineError::Unsupported(status.detail))?;
+        let key = (provider.id.clone(), program);
+        if let Some(engine) = self.native_engines.lock().await.get(&key) {
+            return Ok(engine.clone());
+        }
+        let engine = detect_provider_engine(
+            provider,
+            &key.1,
+            self.models.config().model.prompt_cache_ttl,
+        )
+        .await?;
+        self.native_engines.lock().await.insert(key, engine.clone());
+        Ok(engine)
+    }
+
     /// Engines detected on this machine, by provider protocol name.
     pub fn engines(&self) -> Vec<String> {
         self.engines.keys().map(|k| k.as_str().to_owned()).collect()

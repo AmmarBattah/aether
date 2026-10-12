@@ -9,6 +9,14 @@ For sign-in, see the [quick start](../README.md#quick-start); for source builds 
 
 Aether starts its daemon on demand and opens the TUI. Use `/login claude-code`
 or `/login codex` only if you have not already signed in to that engine CLI.
+Aether searches the daemon's PATH, `~/.local/bin`, and `~/bin` for each CLI,
+using the first distinct install that reports a successful sign-in. Inference
+and `aether login`/`logout` use that same path, which `aether auth --json`
+reports as `program`. An explicit `auth.cli.program` path in `providers.toml`
+pins the install and bypasses discovery. When sign-in fails, `aether auth`,
+`/login`, and the session's sign-in hint show the path and probe reason.
+`aether doctor` warns about duplicate installs and names the selected path.
+
 Choose a model with `/model`, then type your request.
 The agent uses the project directory you launched from, not the directory
 where the daemon originally started. Relaunching in that directory returns to

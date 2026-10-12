@@ -57,6 +57,14 @@ impl TestDaemon {
         Self::launch_in(dir, None, Some(toml.to_owned()), None).await
     }
 
+    pub async fn start_with_providers(providers: &str) -> TestDaemon {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config = dir.path().join("config");
+        std::fs::create_dir_all(&config).expect("config directory");
+        std::fs::write(config.join("providers.toml"), providers).expect("providers config");
+        Self::launch_in(dir, None, None, None).await
+    }
+
     /// Stop, then start again over the same store and configuration.
     pub async fn restart(self) -> TestDaemon {
         self.shutdown.cancel();

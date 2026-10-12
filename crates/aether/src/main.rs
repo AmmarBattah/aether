@@ -250,8 +250,8 @@ fn execute(args: Args, socket: PathBuf) -> anyhow::Result<i32> {
                 provider,
                 api_key,
                 method,
-            } => cli::login(provider, api_key, method).await,
-            Cmd::Logout { provider, json } => cli::logout(provider, json).await,
+            } => cli::login(endpoint, provider, api_key, method).await,
+            Cmd::Logout { provider, json } => cli::logout(endpoint, provider, json).await,
             Cmd::Auth { json } => cli::auth(endpoint, json).await,
             Cmd::Diagnose {
                 out,

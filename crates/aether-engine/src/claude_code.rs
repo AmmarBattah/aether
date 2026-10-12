@@ -65,6 +65,17 @@ impl ClaudeCodeEngine {
         Self::detect_verbose_on(None).await
     }
 
+    /// Detect the exact install selected by the provider's auth probe.
+    pub async fn detect_program(program: &str) -> Result<Self, DetectError> {
+        assert!(!program.is_empty(), "engine program must be configured");
+        let version = detect::probe_version(program, None).await?;
+        assert!(
+            EngineVersion::parse(&version.to_string()).is_some(),
+            "detected version must parse"
+        );
+        Ok(Self::new(program, version.to_string()))
+    }
+
     /// `detect_verbose`, optionally searching `path` instead of the process's
     /// own `PATH` - the seam a test drives with a fake `claude` on a temp dir.
     async fn detect_verbose_on(path: Option<&std::path::Path>) -> Result<Self, DetectError> {

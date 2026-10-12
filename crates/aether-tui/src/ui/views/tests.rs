@@ -1931,3 +1931,43 @@ fn outbox_with_nothing_waiting_offers_only_the_way_out() {
     let actions = acted(press(view.as_mut(), &app, KeyCode::Char('r')));
     assert!(flash(&actions[0]).contains("no operation"));
 }
+
+#[test]
+fn login_picker_displays_the_daemons_cli_failure_detail() {
+    let mut app = viewed_app();
+    let mut info = auth("claude-code", false, Some("/second/claude"));
+    info.methods = vec!["cli".into()];
+    info.detail = Some(
+        "/first/claude: not logged in; /second/claude: status timed out (other installs exist)"
+            .into(),
+    );
+    let status = super::login::status(&info, &app.theme);
+    assert!(status.contains(info.detail.as_deref().unwrap()));
+    assert!(status.contains("subscription sign-in"));
+    app.auth = vec![info];
+    let view = super::login::LoginView::default();
+    let screen = screen_text(&draw(&view, &app, 160));
+    assert!(screen.contains("/first/claude: not logged in"), "{screen}");
+    assert!(
+        screen.contains("/second/claude: status timed out"),
+        "{screen}"
+    );
+}
+
+#[test]
+fn login_picker_allows_client_resolution_when_daemon_reports_no_program() {
+    let mut app = viewed_app();
+    let mut info = auth("claude-code", false, None);
+    info.methods = vec!["cli".into()];
+    info.detail = Some("claude not found in PATH, ~/.local/bin or ~/bin".into());
+    app.auth = vec![info];
+    let mut view = super::login::LoginView::default();
+    let actions = closed(press(&mut view, &app, KeyCode::Enter));
+    assert_eq!(
+        command(&actions[0]),
+        &SlashCommand::Login {
+            provider: Some("claude-code".into())
+        }
+    );
+    assert!(super::login::status(&app.auth[0], &app.theme).contains("claude not found"));
+}

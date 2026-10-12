@@ -44,8 +44,14 @@ pub(super) async fn auth_status(daemon: &Daemon) -> Result<Reply, ErrorReply> {
         .iter()
         .filter(|p| p.enabled)
     {
+        if let Some(cli) = &provider.auth.cli {
+            cli.forget();
+        }
         let status = daemon.models.auth_status(&provider.id).await;
         let mut methods = Vec::new();
+        if provider.auth.cli.is_some() {
+            methods.push("cli".to_owned());
+        }
         if !provider.auth.api_key_env.is_empty() {
             methods.push("api_key".to_owned());
         }
@@ -65,10 +71,10 @@ pub(super) async fn auth_status(daemon: &Daemon) -> Result<Reply, ErrorReply> {
             l.to_lowercase().contains("subscription") || l.to_lowercase().contains("chatgpt")
         });
         let (detail, program) = match &provider.auth.cli {
-            Some(cli) if !status.configured => {
-                (Some(cli.status().await.detail), Some(cli.program.clone()))
+            Some(cli) => {
+                let probe = cli.status().await;
+                ((!status.configured).then_some(probe.detail), probe.program)
             }
-            Some(cli) => (None, Some(cli.program.clone())),
             None => (status.error.clone(), None),
         };
         out.push(AuthInfo {

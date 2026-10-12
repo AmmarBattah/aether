@@ -89,10 +89,54 @@ pub(super) async fn doctor_report(socket: PathBuf, explicit_socket: bool) -> cra
         ),
         doctor::check_logs(&crate::logging::log_file("aetherd.log")),
         providers,
-        doctor::check_engines(&engines_found().await, &command),
+        doctor::check_engines(&engines_found(&auth).await, &command),
+        cli_installs(&auth, &paths.config_dir).await,
         doctor::check_mcp(configured_mcp, &mcp_health, &command),
         doctor::check_remote(remote.as_ref(), &command),
     ])
+}
+
+async fn cli_installs(
+    auth: &[aether_protocol::AuthInfo],
+    config_dir: &std::path::Path,
+) -> crate::doctor::Check {
+    let models = match aether_model::Models::load(Some(config_dir.to_path_buf())) {
+        Ok(models) => models,
+        Err(error) => {
+            return crate::doctor::Check::warn(
+                "cli-installs",
+                error.to_string(),
+                "fix the provider configuration first",
+            );
+        }
+    };
+    let mut installs = Vec::new();
+    for provider in models.registry().providers().iter().filter(|p| p.enabled) {
+        let Some(cli) = &provider.auth.cli else {
+            continue;
+        };
+        let name = match provider.id.as_str() {
+            "claude-code" => "claude",
+            "codex" => "codex",
+            _ => &cli.program,
+        };
+        let paths = aether_model::auth::cli::discover_programs(
+            name,
+            std::env::var_os("PATH").as_deref(),
+            std::env::var_os("HOME")
+                .map(std::path::PathBuf::from)
+                .as_deref(),
+        );
+        if paths.len() < 2 {
+            continue;
+        }
+        let used = match auth.iter().find(|info| info.provider == provider.id) {
+            Some(info) => info.program.clone(),
+            None => cli.status().await.program,
+        };
+        installs.push((provider.id.clone(), paths, used));
+    }
+    crate::doctor::check_cli_installs(&installs)
 }
 
 /// The daemon's remote access status, or `None` from a daemon that predates
@@ -107,33 +151,47 @@ async fn remote_status(client: &Client) -> Option<aether_protocol::remote::Remot
 /// The engine CLIs on this machine: ready, usable with a known limitation, or
 /// unavailable and why - not installed, unreadable output, or a
 /// missing capability - rather than a bare `None`.
-async fn engines_found() -> Vec<(String, crate::doctor::EngineStatus)> {
+async fn engines_found(
+    auth: &[aether_protocol::AuthInfo],
+) -> Vec<(String, crate::doctor::EngineStatus)> {
     use crate::doctor::EngineStatus;
     use aether_engine::Engine as _;
-    let claude = match aether_engine::ClaudeCodeEngine::detect_verbose().await {
-        Ok(e) => match e.limitation() {
-            Some(limitation) => EngineStatus::Limited {
-                adapter: e.adapter(),
-                limitation,
+    let program = |provider: &str, fallback: &str| {
+        auth.iter()
+            .find(|info| info.provider == provider)
+            .and_then(|info| info.program.clone())
+            .unwrap_or_else(|| fallback.to_owned())
+    };
+    let claude =
+        match aether_engine::ClaudeCodeEngine::detect_program(&program("claude-code", "claude"))
+            .await
+        {
+            Ok(e) => match e.limitation() {
+                Some(limitation) => EngineStatus::Limited {
+                    adapter: e.adapter(),
+                    limitation,
+                },
+                None => EngineStatus::Ready(e.adapter()),
             },
-            None => EngineStatus::Ready(e.adapter()),
-        },
-        Err(e) => EngineStatus::Unavailable(e.to_string()),
-    };
-    let codex = match aether_engine::CodexAppEngine::detect_verbose().await {
-        Ok(e) => EngineStatus::Ready(e.adapter()),
-        Err(app_reason) => match aether_engine::CodexEngine::detect_verbose().await {
+            Err(e) => EngineStatus::Unavailable(e.to_string()),
+        };
+    let codex =
+        match aether_engine::CodexAppEngine::detect_program(&program("codex", "codex")).await {
             Ok(e) => EngineStatus::Ready(e.adapter()),
-            // The common case - codex simply absent - fails both probes with
-            // the identical reason; do not repeat it.
-            Err(exec_reason) if exec_reason == app_reason => {
-                EngineStatus::Unavailable(app_reason.to_string())
+            Err(app_reason) => {
+                match aether_engine::CodexEngine::detect_program(&program("codex", "codex")).await {
+                    Ok(e) => EngineStatus::Ready(e.adapter()),
+                    // The common case - codex simply absent - fails both probes with
+                    // the identical reason; do not repeat it.
+                    Err(exec_reason) if exec_reason == app_reason => {
+                        EngineStatus::Unavailable(app_reason.to_string())
+                    }
+                    Err(exec_reason) => EngineStatus::Unavailable(format!(
+                        "{app_reason} (legacy exec fallback: {exec_reason})"
+                    )),
+                }
             }
-            Err(exec_reason) => EngineStatus::Unavailable(format!(
-                "{app_reason} (legacy exec fallback: {exec_reason})"
-            )),
-        },
-    };
+        };
     vec![
         ("claude-code".to_owned(), claude),
         ("codex".to_owned(), codex),

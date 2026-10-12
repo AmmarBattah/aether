@@ -81,16 +81,19 @@ pub(crate) async fn apply_action(
                         .await;
                 }
             };
-            if let Some(kind) = crate::turn_engine::engine_kind(resolved.provider.protocol) {
-                let Some(engine) = runtime.engines.get(&kind) else {
-                    return delegation_refusal(
-                        runtime,
-                        &requested,
-                        network,
-                        &parent.model,
-                        "its engine is not available in this daemon",
-                    )
-                    .await;
+            if crate::turn_engine::engine_kind(resolved.provider.protocol).is_some() {
+                let engine = match runtime.provider_engine(&resolved.provider).await {
+                    Ok(engine) => engine,
+                    Err(error) => {
+                        return delegation_refusal(
+                            runtime,
+                            &requested,
+                            network,
+                            &parent.model,
+                            error,
+                        )
+                        .await;
+                    }
                 };
                 if let Err(error) = engine
                     .validate_network_policy(network == aether_core::agent::NetworkPolicy::Allowed)

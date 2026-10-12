@@ -111,6 +111,32 @@ explicitly if your server requires it.
 context window is never on by default, and
 [Use the 1M window](engines.md#use-the-1m-window) shows the entry that adds it.
 
+### Pin a CLI install
+
+When multiple copies of Claude Code or Codex are installed, Aether searches
+PATH, `~/.local/bin`, and `~/bin` and selects the first that is signed in.
+`aether auth --json` reports the selected path; `aether doctor` warns about
+duplicate installs. Login, logout, inference, and checkpoints use that path.
+
+To pin a specific install, provide its absolute path and the complete CLI
+auth definition in `providers.toml`. An auth override replaces the built-in
+auth definition, so the commands, markers, and label must also be included:
+
+```toml
+[providers.claude-code.auth.cli]
+program = "/absolute/path/to/claude"
+status = ["auth", "status"]
+login = ["auth", "login"]
+logout = ["auth", "logout"]
+logged_in_markers = ['"loggedIn": true', '"loggedIn":true']
+label = "Claude subscription via Claude Code"
+```
+
+For Codex, use `[providers.codex.auth.cli]`, `status = ["login", "status"]`,
+`login = ["login"]`, `logout = ["logout"]`, and
+`logged_in_markers = ["Logged in"]`, with your Codex path and label.
+Explicit paths bypass install discovery.
+
 ### Add an OpenAI-compatible endpoint
 
 Add this to `providers.toml` in the configuration directory. It matches the

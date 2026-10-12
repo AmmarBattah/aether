@@ -763,3 +763,26 @@ fn a_published_listener_with_a_paired_device_is_healthy() {
         Some("`aether remote pair` adds a phone")
     );
 }
+
+#[test]
+fn duplicate_cli_installs_warn_and_name_the_selected_path() {
+    let paths = vec![
+        std::path::PathBuf::from("/first/claude"),
+        std::path::PathBuf::from("/second/claude"),
+    ];
+    let check = check_cli_installs(&[(
+        "claude-code".into(),
+        paths.clone(),
+        Some("/second/claude".into()),
+    )]);
+    assert_eq!(check.level, Level::Warn);
+    assert!(check.detail.contains("/first/claude, /second/claude"));
+    assert!(check.detail.contains("Aether uses /second/claude"));
+    let single = check_cli_installs(&[(
+        "claude-code".into(),
+        vec![paths[0].clone()],
+        Some("/first/claude".into()),
+    )]);
+    assert_eq!(single.level, Level::Ok);
+    assert!(!single.detail.contains("Aether uses"));
+}

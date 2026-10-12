@@ -350,7 +350,7 @@ async fn run_inner(
                 LoopEvent::VoiceControl(request) => {
                     pending.extend(handle_voice_control(&mut app, request, &mut voice_control));
                 }
-                LoopEvent::External(args) => {
+                LoopEvent::External(mut args) => {
                     voice_control = None;
                     for effect in app.voice_suspend() {
                         if let Effect::Voice(effect) = effect {
@@ -358,6 +358,11 @@ async fn run_inner(
                         }
                     }
                     voice.shutdown().await?;
+                    if matches!(args.first().map(String::as_str), Some("login" | "logout")) {
+                        let socket = app.options.socket_path.clone()
+                            .unwrap_or_else(aether_protocol::paths::socket_path);
+                        args.splice(0..0, ["--local".into(), "--socket".into(), socket.display().to_string()]);
+                    }
                     let label = format!("aether {}", args.join(" "));
                     // Give the terminal to the child: raw mode off, main screen back.
                     state.restore();

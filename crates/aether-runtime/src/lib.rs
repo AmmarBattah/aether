@@ -96,7 +96,7 @@ pub use config::{
     DEFAULT_ENGINE_TRANSIENT_RETRY_WINDOW, DEFAULT_EXHAUSTION_PROBE_FLOOR,
     DEFAULT_MAX_CONCURRENT_TURNS, DEFAULT_RESOURCE_WAIT_TIMEOUT, DiskGuard, RuntimeConfig,
 };
-use engine_access::detect_engines;
+use engine_access::{EngineSet, detect_engines};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct CancelRequest {
@@ -227,6 +227,8 @@ pub struct Runtime {
     /// Test hook: bypass provider resolution and use this client for every turn.
     pub(crate) client_override: Option<Arc<dyn ModelClient>>,
     /// External engines found on this machine.
+    pub(crate) detect_native_engines: bool,
+    native_engines: tokio::sync::Mutex<HashMap<(String, String), Arc<dyn aether_engine::Engine>>>,
     pub(crate) engines: HashMap<aether_engine::EngineKind, Arc<dyn aether_engine::Engine>>,
     /// Why an engine absent from `engines` is unusable, when preflight ran
     /// and found a specific reason - empty for engines supplied
@@ -291,18 +293,8 @@ impl Runtime {
         tools: Arc<ToolRegistry>,
         client_override: Option<Arc<dyn ModelClient>>,
     ) -> Result<Arc<Self>> {
-        let (engines, engine_unavailable) =
-            detect_engines(models.config().model.prompt_cache_ttl).await;
-        Self::start_with_engines_inner(
-            config,
-            store,
-            models,
-            tools,
-            client_override,
-            engines,
-            engine_unavailable,
-        )
-        .await
+        let engines = detect_engines(&models).await;
+        Self::start_with_engines_inner(config, store, models, tools, client_override, engines).await
     }
 
     /// Like [`Runtime::start_with`], with the engines given instead of
@@ -323,8 +315,11 @@ impl Runtime {
             models,
             tools,
             client_override,
-            engines,
-            HashMap::new(),
+            EngineSet {
+                by_kind: engines,
+                unavailable: HashMap::new(),
+                detect_native: false,
+            },
         )
         .await
     }
@@ -335,8 +330,7 @@ impl Runtime {
         models: Arc<Models>,
         tools: Arc<ToolRegistry>,
         client_override: Option<Arc<dyn ModelClient>>,
-        engines: HashMap<aether_engine::EngineKind, Arc<dyn aether_engine::Engine>>,
-        engine_unavailable: HashMap<aether_engine::EngineKind, String>,
+        engines: EngineSet,
     ) -> Result<Arc<Self>> {
         // One gate for the whole daemon: memory curation is a read-modify-write
         // against the same store a turn commits to, so both take this.
@@ -350,8 +344,10 @@ impl Runtime {
             },
             default_model: parking_lot::RwLock::new(config.default_model.clone()),
             client_override,
-            engines,
-            engine_unavailable,
+            detect_native_engines: engines.detect_native,
+            engine_unavailable: engines.unavailable,
+            engines: engines.by_kind,
+            native_engines: tokio::sync::Mutex::new(HashMap::new()),
             engine_turns: parking_lot::Mutex::new(HashMap::new()),
             store,
             models,

@@ -18,26 +18,18 @@ pub(crate) async fn execute(
     model: &aether_core::model::ModelRef,
     cancel: CancellationToken,
 ) -> Result<EngineLink> {
-    let Some(kind) = engine_kind(resolved.provider.protocol) else {
+    let Some(_kind) = engine_kind(resolved.provider.protocol) else {
         return Err(RuntimeError::Internal("not an engine provider".into()));
     };
-    let Some(engine) = runtime.engines.get(&kind).cloned() else {
-        // Preflight recorded why, when it ran: too old or missing a
-        // capability reads very differently from genuinely not installed,
-        // and only the stored reason tells them apart.
-        let reason = runtime
-            .engine_unavailable
-            .get(&kind)
-            .cloned()
-            .unwrap_or_else(|| {
-                format!(
-                    "{} is not installed on this machine; install it, sign in to {} from your client, and retry",
-                    kind.as_str(),
-                    resolved.provider.id
-                )
-            });
-        return Ok(EngineLink::Done(Next::Failed(reason)));
+    let engine = match runtime.provider_engine(&resolved.provider).await {
+        Ok(engine) => engine,
+        Err(reason) => return Ok(EngineLink::Done(Next::Failed(reason.to_string()))),
     };
+    if !engine.gates_permissions() && !ctx.agent.config.approval.require_for.is_empty() {
+        return Ok(EngineLink::Done(Next::Failed(
+            "selected CLI install cannot honor this agent's approval policy".into(),
+        )));
+    }
     let Some(bridge) = runtime.config.bridge.clone() else {
         return Ok(EngineLink::Done(Next::Failed(
             "engine bridge is not configured on this daemon".into(),

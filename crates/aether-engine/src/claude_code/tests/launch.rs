@@ -445,3 +445,31 @@ async fn detect_reports_an_absent_program() {
     );
     assert!(error.to_string().contains("claude"));
 }
+
+#[tokio::test]
+async fn detected_program_is_the_path_spawned_for_a_turn() {
+    let dir = fake_claude(
+        r#"if [ "$1" = '--version' ]; then
+    echo '2.1.269'
+else
+    printf '%s' "$0" > "$0.launched"
+fi"#,
+    );
+    let program = dir.path().join("claude").canonicalize().unwrap();
+    let engine = ClaudeCodeEngine::detect_program(program.to_str().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(engine.program, program.to_string_lossy());
+    let mut turn = turn();
+    turn.cwd = dir.path().to_path_buf();
+    let mut run = engine.run(turn, CancellationToken::new()).await.unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while run.events.recv().await.is_some() {}
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(program.with_extension("launched")).unwrap(),
+        program.to_string_lossy()
+    );
+}
