@@ -722,7 +722,7 @@ why `host_only` is open to it; it gains none of the remote administration.
 | `get_tree` | observe | |
 | `update_agent` | operate | `host_only` when `patch.backend` or `patch.tools` is supplied. |
 | `reply_to_question` | operate | |
-| `send_message` | operate | |
+| `send_message` | operate | The same with `attachments` (images). |
 | `cancel` | operate | |
 | `interrupt` | operate | |
 | `restart` | operate | |
@@ -1855,12 +1855,13 @@ socket = "/run/user/1000/aether/aetherd.sock" # optional; host default otherwise
   an environment-only remote. Typing `--remote` with `--socket` or `--local`
   is exit code 2. A typed remote overrides `AETHER_SOCKET`. Profile management
   (`remote add`, `list`, `remove`) always operates on the client's profiles.
-- Protocol N and N-1 are supported. If the newest hello is refused, the
-  client opens a fresh SSH carrier and tries N-1. Incompatible errors report
-  the client version and the daemon's served window. They never suggest
-  automatically restarting the host's daemon. Protocol 17 hosts can run
-  existing fleet commands; protocol 18 host services return a clear
-  unavailable message on those hosts.
+- Protocols 17, 18 and 19 are supported. If the newest hello is refused, the
+  client opens a fresh SSH carrier and tries the next older one, down to 17.
+  Incompatible errors report the client version and the daemon's served
+  window. They never suggest automatically restarting the host's daemon.
+  Protocol 17 hosts can run existing fleet commands; protocol 18 host
+  services return a clear unavailable message on those hosts, and so does a
+  message with images on a host older than protocol 19.
 - `aether bridge --stdio` is a pure byte pump. It reads no configuration,
   interprets no frame, sends no additional hello and never starts a daemon.
   Missing sockets and I/O failures print diagnostics only on stderr and exit

@@ -163,41 +163,7 @@ fn push_user(out: &mut Vec<Value>, msg: &Message) {
                 tool_use_id,
                 content,
                 is_error,
-            } => {
-                let images = content
-                    .iter()
-                    .filter(|c| matches!(c, ToolResultBlock::Image { .. }))
-                    .count();
-                if images > 0 {
-                    // A screenshot-returning tool must not lose its result in
-                    // silence; the Responses input item carries text only.
-                    tracing::warn!(
-                        images,
-                        tool_use_id,
-                        "openai-responses tool results carry no images; they are not sent"
-                    );
-                }
-                let mut text = content
-                    .iter()
-                    .filter_map(|c| match c {
-                        ToolResultBlock::Text { text } => Some(text.as_str()),
-                        ToolResultBlock::Image { .. } => None,
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                if *is_error
-                    && !text
-                        .get(..5)
-                        .is_some_and(|p| p.eq_ignore_ascii_case("error"))
-                {
-                    text = format!("Error: {text}");
-                }
-                out.push(json!({
-                    "type": "function_call_output",
-                    "call_id": tool_use_id,
-                    "output": text,
-                }));
-            }
+            } => out.push(tool_output_item(tool_use_id, content, *is_error)),
             ContentBlock::Text { text } => {
                 if !text.is_empty() {
                     parts.push(json!({"type": "input_text", "text": text}));
@@ -207,12 +173,52 @@ fn push_user(out: &mut Vec<Value>, msg: &Message) {
                 "type": "input_image",
                 "image_url": format!("data:{media_type};base64,{data}"),
             })),
+            // Inlined by the runtime before a request; see the Anthropic adapter.
+            ContentBlock::ImageRef(image) => {
+                parts.push(json!({"type": "input_text", "text": image.label()}));
+            }
             ContentBlock::Thinking { .. } | ContentBlock::ToolUse { .. } => {}
         }
     }
     if !parts.is_empty() {
         out.push(json!({"role": "user", "content": parts}));
     }
+}
+
+/// A tool result as a Responses input item, which carries text only.
+fn tool_output_item(tool_use_id: &str, content: &[ToolResultBlock], is_error: bool) -> Value {
+    let images = content
+        .iter()
+        .filter(|c| matches!(c, ToolResultBlock::Image { .. }))
+        .count();
+    if images > 0 {
+        // A screenshot-returning tool must not lose its result in silence.
+        tracing::warn!(
+            images,
+            tool_use_id,
+            "openai-responses tool results carry no images; they are not sent"
+        );
+    }
+    let mut text = content
+        .iter()
+        .filter_map(|c| match c {
+            ToolResultBlock::Text { text } => Some(text.as_str()),
+            ToolResultBlock::Image { .. } => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    if is_error
+        && !text
+            .get(..5)
+            .is_some_and(|p| p.eq_ignore_ascii_case("error"))
+    {
+        text = format!("Error: {text}");
+    }
+    json!({
+        "type": "function_call_output",
+        "call_id": tool_use_id,
+        "output": text,
+    })
 }
 
 fn push_assistant(out: &mut Vec<Value>, msg: &Message) {
@@ -231,7 +237,8 @@ fn push_assistant(out: &mut Vec<Value>, msg: &Message) {
             // encrypted payload, which Aether does not store.
             ContentBlock::Thinking { .. }
             | ContentBlock::ToolResult { .. }
-            | ContentBlock::Image { .. } => {}
+            | ContentBlock::Image { .. }
+            | ContentBlock::ImageRef(_) => {}
         }
     }
     if !text.is_empty() {

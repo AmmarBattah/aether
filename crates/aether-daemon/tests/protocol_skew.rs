@@ -1,7 +1,7 @@
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
-//! Version skew against a real daemon: N and N-1 are served, anything else is
-//! refused at hello with both bounds named.
+//! Version skew against a real daemon: N and the two before it are served,
+//! anything else is refused at hello with both bounds named.
 
 mod support;
 
@@ -49,6 +49,53 @@ async fn previous_version_preserves_watcher_allowlists() {
         read["result"]["Ok"]["data"]["config"]["repositories"][0]["allowed_users"],
         json!(["octocat"])
     );
+    daemon.stop().await;
+}
+
+/// The same stored image, read at every served version: the current one gets
+/// the reference, each older one a line of text it can decode.
+#[tokio::test]
+async fn an_older_client_reads_a_stored_image_as_text() {
+    const PNG_BASE64: &str = "iVBORw0KGgpwaXhlbHM=";
+    let daemon = TestDaemon::start().await;
+    let mut current = RawConn::connect(&daemon.socket).await.expect("connect");
+    current.hello(PROTOCOL_VERSION).await.expect("served");
+    let created = current
+        .call(json!({"cmd": "create_agent", "role": "skew", "start": false, "model": {"provider": "claude-code", "model": "haiku"}}))
+        .await;
+    let agent = created["result"]["Ok"]["data"]["id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("an agent id: {created}"))
+        .to_owned();
+    let sent = current
+        .call(
+            json!({"cmd": "send_message", "to": agent, "content": "look",
+            "attachments": [{"media_type": "image/png", "data": PNG_BASE64, "name": "shot.png"}]}),
+        )
+        .await;
+    assert_eq!(sent["result"]["Ok"]["reply"], "message_sent", "{sent}");
+
+    let inbox = json!({"cmd": "get_inbox", "agent": agent, "after": 0});
+    let now = current.call(inbox.clone()).await;
+    let blocks = &now["result"]["Ok"]["data"][0]["kind"]["content"];
+    assert_eq!(blocks[0], json!({"type": "text", "text": "look"}), "{now}");
+    assert_eq!(blocks[1]["type"], "image_ref", "{now}");
+    assert_eq!(blocks[1]["name"], "shot.png", "{now}");
+    assert_eq!(blocks[1]["size_bytes"], 14, "{now}");
+
+    for version in MIN_PROTOCOL_VERSION..PROTOCOL_VERSION {
+        let mut old = RawConn::connect(&daemon.socket).await.expect("connect");
+        old.hello(version).await.expect("served");
+        let before = old.call(inbox.clone()).await;
+        assert_eq!(
+            before["result"]["Ok"]["data"][0]["kind"]["content"],
+            json!([
+                {"type": "text", "text": "look"},
+                {"type": "text", "text": "[image: shot.png, 14 B]"}
+            ]),
+            "v{version}: {before}"
+        );
+    }
     daemon.stop().await;
 }
 

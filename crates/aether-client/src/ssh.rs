@@ -30,20 +30,28 @@ impl Carrier {
     }
 }
 
+/// Connect at the newest version the host serves, trying each this build
+/// can speak from its own down to the oldest.
 pub(crate) async fn connect(remote: &SshRemote) -> Result<Client> {
-    let version = aether_protocol::PROTOCOL_VERSION;
-    match connect_version(remote, version).await {
-        Err(ClientError::Incompatible(first)) => connect_version(remote, version - 1)
-            .await
-            .map_err(|second| match second {
-                ClientError::Incompatible(second) => ClientError::Incompatible(format!(
-                    "{first}; protocol {} also refused: {second}",
-                    version - 1
-                )),
-                error => error,
-            }),
-        result => result,
+    let versions =
+        aether_protocol::compat::MIN_PROTOCOL_VERSION..=aether_protocol::PROTOCOL_VERSION;
+    let mut refusals: Vec<String> = Vec::new();
+    for version in versions.rev() {
+        match connect_version(remote, version).await {
+            Err(ClientError::Incompatible(refusal)) if refusals.is_empty() => {
+                refusals.push(refusal);
+            }
+            Err(ClientError::Incompatible(refusal)) => {
+                refusals.push(format!("protocol {version} also refused: {refusal}"));
+            }
+            result => return result,
+        }
     }
+    debug_assert!(
+        !refusals.is_empty(),
+        "the window holds at least one version"
+    );
+    Err(ClientError::Incompatible(refusals.join("; ")))
 }
 
 async fn connect_version(remote: &SshRemote, version: u32) -> Result<Client> {

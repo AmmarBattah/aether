@@ -1,6 +1,7 @@
 //! The async event loop: terminal setup, input, subscription frames, replies
 //! and the frame tick, with effects executed on the reducer's behalf.
 
+use crate::image_input::ImageSource;
 use crate::keyboard::KeyboardMode;
 use std::io::{Stdout, stdout};
 use std::sync::Arc;
@@ -540,11 +541,21 @@ fn map_terminal_event(ev: Event) -> Option<AppEvent> {
         Event::Key(key) if key.kind != KeyEventKind::Release => Some(AppEvent::Key(key)),
         Event::Key(_) => None,
         Event::Mouse(_) => None,
-        Event::Paste(text) => Some(AppEvent::Paste(text)),
+        Event::Paste(text) => Some(paste_event(text)),
         Event::Resize(w, h) => Some(AppEvent::Resize(w, h)),
         Event::FocusGained => Some(AppEvent::Focus(true)),
         Event::FocusLost => Some(AppEvent::Focus(false)),
     }
+}
+
+/// A paste as the app takes it: text, or the image file the text names.
+pub(crate) fn paste_event(text: String) -> AppEvent {
+    let home = crate::workspace::home_dir();
+    let Some(path) = crate::image_input::pasted_image_path(&text, home.as_deref()) else {
+        return AppEvent::Paste(text);
+    };
+    let image = aether_client::images::read_image_file(&path).map_err(|e| e.to_string());
+    AppEvent::ImagePathPasted { text, image }
 }
 
 fn dispatch_app_event(app: &mut App, cache: &mut ViewCache, event: AppEvent) -> Vec<Effect> {
@@ -556,6 +567,14 @@ fn dispatch_app_event(app: &mut App, cache: &mut ViewCache, event: AppEvent) -> 
         app.dirty |= cleared;
     }
     app.reduce(event)
+}
+
+/// Read an image off the UI loop; the helper behind a clipboard can take seconds.
+fn spawn_image_read(tx: mpsc::UnboundedSender<LoopEvent>, source: ImageSource) {
+    tokio::spawn(async move {
+        let image = crate::image_input::read(source).await;
+        let _ = tx.send(LoopEvent::App(AppEvent::ImageRead(image)));
+    });
 }
 
 pub(crate) fn execute_effects(
@@ -604,6 +623,7 @@ pub(crate) fn execute_effects(
             Effect::Copy(text) => {
                 spawn_copy(tx.clone(), text, out);
             }
+            Effect::AttachImage(source) => spawn_image_read(tx.clone(), source),
             Effect::Bell => {
                 use std::io::Write as _;
                 let mut out = stdout();

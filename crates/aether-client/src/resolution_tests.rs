@@ -55,6 +55,7 @@ fn lost_send(key: &str) -> Command {
         to: AgentId::new(),
         content: "ship it".into(),
         subtree: false,
+        attachments: Vec::new(),
         idempotency_key: Some(key.into()),
     }
 }

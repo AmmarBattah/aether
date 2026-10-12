@@ -1,14 +1,15 @@
-//! Serving the previous protocol version: replies are rewritten for a client one
-//! version back, and its requests decode unchanged (docs/protocol.md).
+//! Serving older protocol versions: replies are rewritten for a client behind
+//! this build, and its requests decode unchanged (docs/protocol.md).
 
 use crate::{ErrorCode, ErrorReply, Hello, PROTOCOL_VERSION, ServerFrame};
+use aether_core::model::ContentBlock;
+use serde_json::Value;
 
-/// Oldest protocol version this build still serves. Saturating, and never
-/// below 1: version 0 was never a thing to serve.
-pub const MIN_PROTOCOL_VERSION: u32 = {
-    let one_back = PROTOCOL_VERSION.saturating_sub(1);
-    if one_back < 1 { 1 } else { one_back }
-};
+/// Oldest protocol version this build still serves. Two back, not one: 18
+/// and 19 were released days apart, and both rewrites are small.
+pub const MIN_PROTOCOL_VERSION: u32 = 17;
+
+const _: () = assert!(MIN_PROTOCOL_VERSION >= 1 && MIN_PROTOCOL_VERSION < PROTOCOL_VERSION);
 
 /// The version a connection will speak, or why the client is refused.
 pub fn negotiate(hello: &Hello) -> Result<u32, ErrorReply> {
@@ -33,35 +34,79 @@ pub fn encode_for(version: u32, frame: &ServerFrame) -> Result<String, serde_jso
         (MIN_PROTOCOL_VERSION..=PROTOCOL_VERSION).contains(&version),
         "a connection only ever speaks a negotiated version, got {version}"
     );
-    if version < 18 {
-        return encode_for_v17(frame);
+    if version < 18
+        && let Some(folded) = v17_error_reply(frame)
+    {
+        return crate::encode(&folded);
     }
-    crate::encode(frame)
+    let line = crate::encode(frame)?;
+    let hide_images = version < 19 && line.contains(IMAGE_REF_TAG);
+    let hide_devices = version < 18 && line.contains(DEVICE_ORIGIN);
+    if !hide_images && !hide_devices {
+        return Ok(line);
+    }
+    let mut value: Value = serde_json::from_str(&line)?;
+    if hide_images {
+        replace_image_refs(&mut value);
+    }
+    if hide_devices {
+        hide_device_origins(&mut value);
+    }
+    crate::encode(&value)
 }
 
 /// What marks a device origin in an encoded frame. Quotes inside a JSON
 /// string are escaped, so this only ever matches structure.
 const DEVICE_ORIGIN: &str = r#""transport":"device""#;
 
-fn encode_for_v17(frame: &ServerFrame) -> Result<String, serde_json::Error> {
-    if let ServerFrame::Reply {
+/// The wire tag of a stored image's content block, new in v19.
+const IMAGE_REF_TAG: &str = "image_ref";
+
+/// An error reply whose code a v17 client cannot decode, with the code it
+/// reads in its place.
+fn v17_error_reply(frame: &ServerFrame) -> Option<ServerFrame> {
+    let ServerFrame::Reply {
         id,
         result: Err(error),
     } = frame
-        && let Some(code) = v17_error_code(error.code)
-    {
-        return crate::encode(&ServerFrame::Reply {
-            id: *id,
-            result: Err(ErrorReply::new(code, error.message.clone())),
-        });
+    else {
+        return None;
+    };
+    let code = v17_error_code(error.code)?;
+    Some(ServerFrame::Reply {
+        id: *id,
+        result: Err(ErrorReply::new(code, error.message.clone())),
+    })
+}
+
+/// Turn every `image_ref` block under `value` into a text block. Depth is
+/// bounded: the value was parsed, and the parser stops at 128 levels.
+fn replace_image_refs(value: &mut Value) {
+    match value {
+        Value::Array(items) => items.iter_mut().for_each(replace_image_refs),
+        Value::Object(fields) => {
+            let tagged = fields.get("type").and_then(Value::as_str) == Some(IMAGE_REF_TAG);
+            if tagged && let Some(text) = image_ref_text(value) {
+                *value = text;
+                return;
+            }
+            if let Value::Object(fields) = value {
+                fields.values_mut().for_each(replace_image_refs);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
     }
-    let line = crate::encode(frame)?;
-    if !line.contains(DEVICE_ORIGIN) {
-        return Ok(line);
+}
+
+/// The text block standing in for `value`, when it is a stored image's block
+/// and not arbitrary JSON (a tool's input) that happens to carry the tag.
+fn image_ref_text(value: &Value) -> Option<Value> {
+    match serde_json::from_value::<ContentBlock>(value.clone()) {
+        Ok(ContentBlock::ImageRef(image)) => {
+            serde_json::to_value(ContentBlock::text(image.label())).ok()
+        }
+        _ => None,
     }
-    let mut value: serde_json::Value = serde_json::from_str(&line)?;
-    hide_device_origins(&mut value);
-    crate::encode(&value)
 }
 
 /// The code a v17 client reads in place of one it cannot decode.
@@ -75,8 +120,7 @@ fn v17_error_code(code: ErrorCode) -> Option<ErrorCode> {
 
 /// Rewrite every `user` actor with a device origin into a named user with no
 /// origin. Depth is bounded by the parser's own nesting limit.
-fn hide_device_origins(value: &mut serde_json::Value) {
-    use serde_json::Value;
+fn hide_device_origins(value: &mut Value) {
     match value {
         Value::Object(map) => {
             let is_device = map.get("actor").and_then(Value::as_str) == Some("user")
@@ -100,7 +144,6 @@ mod tests {
     use aether_core::agent::{Agent, AgentStatus, BlockReason};
     use aether_core::github::{GithubRepositoryConfig, GithubWatcherStatus};
     use aether_core::inbox::{InboxItem, InboxKind};
-    use serde_json::Value;
 
     #[test]
     fn v15_watcher_allowlists_are_preserved_in_the_served_window() {
@@ -415,11 +458,13 @@ mod tests {
     }
 
     #[test]
-    fn the_window_is_this_version_and_one_back() {
-        let mut hello = Hello::new("t", "0");
-        assert_eq!(negotiate(&hello), Ok(PROTOCOL_VERSION));
-        hello.protocol_version = MIN_PROTOCOL_VERSION;
-        assert_eq!(negotiate(&hello), Ok(MIN_PROTOCOL_VERSION));
+    fn the_window_is_this_version_and_two_back() {
+        assert_eq!((MIN_PROTOCOL_VERSION, PROTOCOL_VERSION), (17, 19));
+        for version in MIN_PROTOCOL_VERSION..=PROTOCOL_VERSION {
+            let mut hello = Hello::new("t", "0");
+            hello.protocol_version = version;
+            assert_eq!(negotiate(&hello), Ok(version));
+        }
     }
 
     #[test]
@@ -657,7 +702,7 @@ mod tests {
                 .unwrap()
                 .contains(&Value::String("status_since".into()))
         );
-        assert_eq!((MIN_PROTOCOL_VERSION, PROTOCOL_VERSION), (17, 18));
+        assert_eq!((MIN_PROTOCOL_VERSION, PROTOCOL_VERSION), (17, 19));
     }
 
     #[test]
@@ -677,5 +722,113 @@ mod tests {
         let mut hello = Hello::new("v16", "test");
         hello.protocol_version = 16;
         assert!(negotiate(&hello).is_err());
+    }
+
+    fn stored_image() -> aether_core::attachment::AttachmentRef {
+        aether_core::attachment::AttachmentRef {
+            id: aether_core::attachment::AttachmentId::of(b"png bytes"),
+            media_type: "image/png".into(),
+            size_bytes: 1_258_291,
+            name: Some("shot.png".into()),
+        }
+    }
+
+    fn message_with_image(from: aether_core::event::Actor) -> ServerFrame {
+        reply(Reply::Inbox(vec![InboxItem {
+            id: aether_core::id::InboxItemId::new(),
+            agent_id: aether_core::id::AgentId::new(),
+            seq: 4,
+            kind: InboxKind::Message {
+                message_id: aether_core::id::MessageId::new(),
+                from,
+                content: vec![
+                    ContentBlock::text("what is this?"),
+                    ContentBlock::ImageRef(stored_image()),
+                ],
+            },
+            delivered_at: "2026-10-12T11:00:00Z".parse().expect("timestamp"),
+        }]))
+    }
+
+    fn message_content(line: &str) -> (String, Vec<ContentBlock>) {
+        let ServerFrame::Reply {
+            id: 7,
+            result: Ok(Reply::Inbox(items)),
+        } = crate::decode(line).expect("the client decodes it")
+        else {
+            panic!("the reply keeps its shape: {line}");
+        };
+        let InboxKind::Message { from, content, .. } = &items[0].kind else {
+            panic!("still a message");
+        };
+        (from.label(), content.clone())
+    }
+
+    /// A v17 or v18 client cannot decode `image_ref`. It reads the line a
+    /// newer client prints instead of losing the whole reply.
+    #[test]
+    fn an_older_client_reads_a_stored_image_as_its_line_of_text() {
+        let frame = message_with_image(aether_core::event::Actor::user());
+        let current = encode_for(PROTOCOL_VERSION, &frame).expect("encode");
+        assert_eq!(
+            crate::decode::<ServerFrame>(&current).expect("decode"),
+            frame
+        );
+        assert!(current.contains("\"image_ref\""), "{current}");
+
+        for version in [17, 18] {
+            let old = encode_for(version, &frame).expect("encode");
+            assert!(!old.contains("image_ref"), "v{version}: {old}");
+            assert_eq!(
+                message_content(&old).1,
+                [
+                    ContentBlock::text("what is this?"),
+                    ContentBlock::text("[image: shot.png, 1.2 MB]"),
+                ],
+                "v{version}"
+            );
+        }
+    }
+
+    /// A phone's message with an image needs both rewrites for v17 and only
+    /// the image's for v18, which reads the device origin itself.
+    #[test]
+    fn a_device_message_with_an_image_gets_each_versions_rewrites() {
+        use aether_core::event::{Actor, OperatorOrigin};
+        let frame = message_with_image(Actor::connected_user(OperatorOrigin::Device {
+            device: aether_core::id::DeviceId::new(),
+            name: "phone".into(),
+            connection: "c1".into(),
+        }));
+        let v18 = encode_for(18, &frame).expect("encode");
+        assert!(v18.contains(DEVICE_ORIGIN), "{v18}");
+        assert!(!v18.contains("image_ref"), "{v18}");
+        let v17 = encode_for(17, &frame).expect("encode");
+        assert!(!v17.contains(DEVICE_ORIGIN), "{v17}");
+        let (from, content) = message_content(&v17);
+        assert_eq!(from, "user:device:phone");
+        assert_eq!(content[1], ContentBlock::text("[image: shot.png, 1.2 MB]"));
+    }
+
+    /// Only a real stored-image block is rewritten: JSON that merely carries
+    /// the tag (a tool's input) reaches an older client untouched.
+    #[test]
+    fn json_that_only_looks_like_a_stored_image_is_left_alone() {
+        let lookalike = serde_json::json!({"type": "image_ref", "note": "not a block"});
+        let mut value =
+            serde_json::json!({"input": lookalike.clone(), "list": [lookalike.clone()]});
+        replace_image_refs(&mut value);
+        assert_eq!(value["input"], lookalike);
+        assert_eq!(value["list"][0], lookalike);
+
+        let mut real = serde_json::json!({"nested": [serde_json::to_value(
+            ContentBlock::ImageRef(stored_image())
+        )
+        .expect("block")]});
+        replace_image_refs(&mut real);
+        assert_eq!(
+            real["nested"][0],
+            serde_json::json!({"type": "text", "text": "[image: shot.png, 1.2 MB]"})
+        );
     }
 }

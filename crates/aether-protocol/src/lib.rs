@@ -31,6 +31,7 @@ use aether_core::agent::{
     Agent, AgentConfig, AgentStatusKind, ApprovalDefault, ApprovalPolicy, DeadlineUpdate,
     ExecutionBackend, NetworkPolicy, Scope,
 };
+pub use aether_core::attachment::{AttachmentId, AttachmentRef, ImageAttachment};
 
 use aether_core::approval::{ApprovalRule, RuleMatch, RuleScope};
 use aether_core::artifact::Artifact;
@@ -60,10 +61,11 @@ use aether_core::transfer::{ExportSummary, ImportSummary};
 use serde::{Deserialize, Serialize};
 
 /// Bumped on any incompatible change to frames, commands or replies. The
-/// daemon serves this version and the one before it, translating the changed
-/// shapes at the edge ([`compat`]); anything outside that window is refused at
-/// hello rather than failing to decode a reply later. Bumping this constant
-/// therefore also means writing the rewrite that keeps the new N-1 served.
+/// daemon serves this version and at least the one before it, translating the
+/// changed shapes at the edge ([`compat`]); anything outside that window is
+/// refused at hello rather than failing to decode a reply later. Bumping this
+/// constant therefore also means writing the rewrite that keeps the new N-1
+/// served.
 ///
 /// 2: `Reply::Paused` carries `agents`/`mid_turn` instead of
 /// `after_current_turn`. `AgentPatch.deadline` is new in this version and is
@@ -142,7 +144,13 @@ use serde::{Deserialize, Serialize};
 ///
 /// 18: remote control (docs/protocol.md). Device origins and the `forbidden` and
 /// `unimplemented` codes are folded for v17 by `compat`; the rest is additive.
-pub const PROTOCOL_VERSION: u32 = 18;
+///
+/// 19: `SendMessage.attachments` and the `image_ref` content block a message
+/// with images then carries. A v18 daemon would drop the images in silence,
+/// so it is refused at hello. An older client cannot decode the block; `compat`
+/// hands it the same line of text a newer client prints for the image. This
+/// build serves two versions back, 17 and 18.
+pub const PROTOCOL_VERSION: u32 = 19;
 
 /// Optional features a peer may advertise. Unknown ones are ignored.
 pub mod features {

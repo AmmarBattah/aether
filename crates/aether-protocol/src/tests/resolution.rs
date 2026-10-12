@@ -9,6 +9,7 @@ fn lost_send() -> Command {
         to: AGENT.parse().expect("agent id"),
         content: "ship it".into(),
         subtree: false,
+        attachments: Vec::new(),
         idempotency_key: Some("outbox-7".into()),
     }
 }

@@ -210,7 +210,8 @@ async fn incompatible_versions_report_both_sides_without_remote_restart_advice()
     let fixture = Fixture::new();
     let listener = tokio::net::UnixListener::bind(&fixture.socket).expect("listener");
     let host = tokio::spawn(async move {
-        for _ in 0..2 {
+        // One refusal per version the client can speak.
+        for _ in aether_protocol::compat::MIN_PROTOCOL_VERSION..=aether_protocol::PROTOCOL_VERSION {
             let (stream, _) = listener.accept().await.expect("connection");
             let (read, mut write) = stream.into_split();
             let line = BufReader::new(read)
@@ -237,7 +238,9 @@ async fn incompatible_versions_report_both_sides_without_remote_restart_advice()
     assert!(!result.status.success());
     let error = String::from_utf8_lossy(&result.stderr);
     assert!(
-        error.contains("15..=16") && error.contains("protocol 18"),
+        error.contains("15..=16")
+            && error.contains("protocol 18 also refused")
+            && error.contains("protocol 17 also refused"),
         "{error}"
     );
     assert!(!error.contains(" stop"), "{error}");
@@ -317,24 +320,25 @@ async fn previous_protocol_is_negotiated_on_a_fresh_carrier() {
     let fixture = Fixture::new();
     let listener = tokio::net::UnixListener::bind(&fixture.socket).expect("listener");
     let host = tokio::spawn(async move {
-        let (stream, _) = listener.accept().await.expect("first carrier");
-        let (read, mut write) = stream.into_split();
-        let mut lines = BufReader::new(read).lines();
-        let frame = next_frame(&mut lines).await;
-        assert!(
-            matches!(frame.command, WireCommand::Hello(ref hello) if hello.protocol_version == 18)
-        );
-        send_reply(
-            &mut write,
-            frame.id,
-            Err(ErrorReply {
-                code: ErrorCode::Incompatible,
-                message: "daemon serves protocols 16..=17".into(),
-            }),
-        )
-        .await;
-        drop(lines);
-        drop(write);
+        // Each newer version is refused on a carrier of its own, newest first.
+        for version in (18..=aether_protocol::PROTOCOL_VERSION).rev() {
+            let (stream, _) = listener.accept().await.expect("a fresh carrier");
+            let (read, mut write) = stream.into_split();
+            let mut lines = BufReader::new(read).lines();
+            let frame = next_frame(&mut lines).await;
+            assert!(
+                matches!(frame.command, WireCommand::Hello(ref hello) if hello.protocol_version == version)
+            );
+            send_reply(
+                &mut write,
+                frame.id,
+                Err(ErrorReply {
+                    code: ErrorCode::Incompatible,
+                    message: "daemon serves protocols 16..=17".into(),
+                }),
+            )
+            .await;
+        }
         hello(&listener, 17).await;
     });
     let add = fixture.add("fake-host");

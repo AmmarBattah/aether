@@ -122,3 +122,44 @@ async fn version_17_only_records_commands_supported_by_that_host() {
         );
     }
 }
+
+/// A host one version back ignores `attachments`, so the client refuses
+/// there instead of letting the text arrive alone.
+#[tokio::test]
+async fn a_message_with_images_is_not_sent_to_a_host_that_would_drop_them() {
+    let send = |attachments| Command::SendMessage {
+        to: aether_core::id::AgentId::new(),
+        content: "look".into(),
+        subtree: false,
+        attachments,
+        idempotency_key: None,
+    };
+    let image = aether_core::attachment::ImageAttachment {
+        media_type: "image/png".into(),
+        data: "iVBORw0KGgpwaXhlbHM=".into(),
+        name: None,
+    };
+    let (transport, _peer) = Transport::memory(4);
+    let mut client = Client::from_transport(transport);
+    let mut welcome = crate::tests::welcome();
+    welcome.protocol_version = 18;
+    welcome.daemon_protocol_version = Some(18);
+    client.welcome = Some(welcome);
+
+    let refused = client
+        .request(send(vec![image.clone()]))
+        .await
+        .expect_err("refused before anything is written");
+    let crate::ClientError::Protocol(error) = &refused else {
+        panic!("a protocol refusal: {refused:?}");
+    };
+    assert_eq!(error.code, aether_protocol::ErrorCode::Unimplemented);
+    assert!(error.message.contains("protocol 19"), "{}", error.message);
+    assert!(client.check_images_supported(&send(Vec::new())).is_ok());
+
+    let mut current = crate::tests::welcome();
+    current.protocol_version = aether_protocol::PROTOCOL_VERSION;
+    current.daemon_protocol_version = Some(aether_protocol::PROTOCOL_VERSION);
+    client.welcome = Some(current);
+    assert!(client.check_images_supported(&send(vec![image])).is_ok());
+}

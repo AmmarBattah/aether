@@ -20,7 +20,8 @@ Start with the [README](../README.md) for prerequisites, installation, and a fir
 - [MCP servers](mcp-servers.md): configured servers and the caller identity
   each call carries in `_meta`.
 - [Daemon protocol](protocol.md): request correlation, malformed-frame errors,
-  and the served version window with what protocol 18 changed.
+  the served version window with what protocols 18 and 19 changed, and images
+  on a message.
 - [Phone setup](remote-setup.md): the guided `aether remote setup` for a
   non-technical reader, with troubleshooting and what protects you.
 - [Remote control](remote.md): the phone web app's contract (endpoints, device

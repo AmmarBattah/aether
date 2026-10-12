@@ -96,7 +96,34 @@ fn legacy_keyed_command(command: &Command) -> bool {
     )
 }
 
+/// The first protocol version whose daemon stores a message's images.
+const IMAGES_SINCE: u32 = 19;
+
 impl crate::Client {
+    /// Refuse a message with images to a host that would deliver its text
+    /// alone: an older daemon ignores `attachments` without saying so.
+    pub(crate) fn check_images_supported(&self, command: &Command) -> crate::Result<()> {
+        let Command::SendMessage { attachments, .. } = command else {
+            return Ok(());
+        };
+        let Some(welcome) = self.welcome.as_ref().filter(|_| !attachments.is_empty()) else {
+            return Ok(());
+        };
+        let host = welcome
+            .daemon_protocol_version
+            .unwrap_or(welcome.protocol_version);
+        if host >= IMAGES_SINCE {
+            return Ok(());
+        }
+        Err(crate::ClientError::Protocol(aether_protocol::ErrorReply {
+            code: aether_protocol::ErrorCode::Unimplemented,
+            message: format!(
+                "sending images requires protocol {IMAGES_SINCE} and the host speaks {host}; \
+                 update Aether on the host. Nothing was sent"
+            ),
+        }))
+    }
+
     pub(crate) fn prepare_remote_command(&self, command: &mut Command) -> crate::Result<bool> {
         if self.carrier.is_none() {
             return Ok(false);

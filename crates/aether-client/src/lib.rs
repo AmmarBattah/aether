@@ -6,6 +6,7 @@
 //! the CLI and orchestration applications all sit on this crate.
 
 pub mod endpoint;
+pub mod images;
 pub mod mcp;
 pub mod serve;
 pub mod sink;
@@ -340,6 +341,7 @@ impl Client {
                 "use Client::subscribe to receive subscription frames".into(),
             ));
         }
+        self.check_images_supported(&command)?;
         let keyed = self.prepare_remote_command(&mut command)?;
         let mutating = self.carrier.is_some() && delivery::is_mutating(&command);
         let name = command.name();

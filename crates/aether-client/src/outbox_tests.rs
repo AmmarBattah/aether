@@ -9,6 +9,7 @@ fn send(content: &str, key: &str) -> Command {
         to: AgentId::new(),
         content: content.into(),
         subtree: false,
+        attachments: Vec::new(),
         idempotency_key: Some(key.into()),
     }
 }

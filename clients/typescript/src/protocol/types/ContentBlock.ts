@@ -2,6 +2,7 @@
 // Do not edit: change the Rust types and regenerate.
 
 import type {
+  AttachmentId,
   ToolResultBlock,
 } from "../../protocol.ts";
 
@@ -41,10 +42,24 @@ export interface ContentBlockImage {
   "type": "image";
 }
 
+/**
+ * An image a person sent with a message, kept by the daemon. Durable
+ * state carries this reference; the bytes are read back only to build
+ * a model request.
+ */
+export interface ContentBlockImageRef {
+  "id": AttachmentId;
+  "media_type": string;
+  "name"?: string | null;
+  "size_bytes": number;
+  "type": "image_ref";
+}
+
 export type ContentBlock =
     ContentBlockText |
     ContentBlockThinking |
     ContentBlockToolUse |
     ContentBlockToolResult |
-    ContentBlockImage
+    ContentBlockImage |
+    ContentBlockImageRef
 ;

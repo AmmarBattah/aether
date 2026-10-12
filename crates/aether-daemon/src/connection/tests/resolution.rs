@@ -24,6 +24,7 @@ fn send(to: AgentId, content: &str, key: &str) -> Command {
         to,
         content: content.into(),
         subtree: false,
+        attachments: Vec::new(),
         idempotency_key: Some(key.into()),
     }
 }

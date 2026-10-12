@@ -189,6 +189,7 @@ fn submission_namespaces_follow_device_ids_not_connection_or_name() {
         to: aether_core::id::AgentId::new(),
         content: "continue".into(),
         subtree: false,
+        attachments: Vec::new(),
         idempotency_key: Some("same-outbox-key".into()),
     };
     let receipt = operator.submission(&command).unwrap().unwrap();

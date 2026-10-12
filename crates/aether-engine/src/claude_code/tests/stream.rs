@@ -184,11 +184,95 @@ fn only_queued_work_before_the_prompt_echo_is_skipped() {
 
 #[test]
 fn user_message_lines_are_stream_json() {
-    let line = user_message_line("hi\nthere");
+    let line = user_message_line("hi\nthere", &[]);
     assert!(line.ends_with('\n'));
     let v: serde_json::Value = serde_json::from_str(line.trim()).expect("json");
     assert_eq!(v["type"], "user");
     assert_eq!(v["message"]["content"][0]["text"], "hi\nthere");
+}
+
+/// A message without images is, byte for byte, the line it was before a
+/// message could carry any.
+#[test]
+fn a_text_only_user_message_line_is_unchanged() {
+    assert_eq!(
+        user_message_line("hi", &[]),
+        "{\"message\":{\"content\":[{\"text\":\"hi\",\"type\":\"text\"}],\"role\":\"user\"},\"type\":\"user\"}\n"
+    );
+}
+
+#[test]
+fn a_user_message_line_carries_its_images_after_the_text() {
+    use base64::Engine as _;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("shot.png");
+    let bytes = b"\x89PNG\r\n\x1a\npixels";
+    std::fs::write(&path, bytes).expect("write image");
+    let stored = crate::EngineImage {
+        path,
+        media_type: "image/png".into(),
+    };
+    let gone = crate::EngineImage {
+        path: dir.path().join("removed.png"),
+        media_type: "image/png".into(),
+    };
+
+    let line = user_message_line("what is this?", &[stored, gone]);
+    let v: serde_json::Value = serde_json::from_str(line.trim()).expect("json");
+    assert_eq!(
+        v["message"]["content"],
+        json!([
+            {"type": "text", "text": "what is this?"},
+            {"type": "image", "source": {
+                "type": "base64",
+                "media_type": "image/png",
+                "data": base64::engine::general_purpose::STANDARD.encode(bytes),
+            }},
+        ]),
+        "the text, then the readable image; the removed one is left out"
+    );
+}
+
+/// The CLI echoes every user line back (`--replay-user-messages`), and the
+/// reader refuses a longer line: one message's worth of images must fit it.
+#[test]
+fn a_line_with_one_messages_worth_of_images_fits_the_echo_the_reader_accepts() {
+    use aether_core::attachment::{MAX_IMAGE_BYTES, MAX_MESSAGE_IMAGE_BYTES};
+    let dir = tempfile::tempdir().expect("tempdir");
+    let image = |name: &str, len: usize| {
+        let path = dir.path().join(name);
+        std::fs::write(&path, vec![0u8; len]).expect("write image");
+        crate::EngineImage {
+            path,
+            media_type: "image/png".into(),
+        }
+    };
+    let full = image("full.png", MAX_IMAGE_BYTES);
+    let rest = image("rest.png", MAX_MESSAGE_IMAGE_BYTES - 2 * MAX_IMAGE_BYTES);
+    let one_message = [full.clone(), full.clone(), rest];
+    let line = user_message_line("look", &one_message);
+    assert!(
+        line.len() < crate::output::MAX_LINE_BYTES,
+        "{} bytes",
+        line.len()
+    );
+    // Two legal messages folded into one line would not: the runtime splits them.
+    let folded = [full.clone(), full.clone(), full.clone(), full];
+    assert!(user_message_line("look", &folded).len() > crate::output::MAX_LINE_BYTES);
+}
+
+/// The CLI echoes a steered message with its images; that echo is still the
+/// acknowledgement of its text.
+#[test]
+fn an_echo_with_images_acknowledges_its_message() {
+    let mut st = ParseState::default();
+    st.expect_echo("look at this");
+    let echo = json!({"type": "user", "isReplay": true, "message": {"role": "user", "content": [
+        {"type": "text", "text": "look at this"},
+        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "AAAA"}},
+    ]}})
+    .to_string();
+    assert_eq!(parse_line(&echo, &mut st), vec![EngineEvent::InputAccepted]);
 }
 
 #[test]

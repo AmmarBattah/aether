@@ -525,6 +525,7 @@ async fn device_messages_questions_and_decisions_preserve_actor_and_replay_once(
             to: agent,
             content: "message".into(),
             subtree: false,
+            attachments: Vec::new(),
             idempotency_key: Some("message-key".into()),
         },
         Command::ResolveApproval {

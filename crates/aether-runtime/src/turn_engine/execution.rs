@@ -65,8 +65,11 @@ pub(crate) async fn execute(
         .into_iter()
         .filter(|t| t.creator == Actor::agent(ctx.agent.id))
         .collect();
-    let pending_inbox = runtime.store.inbox(ctx.agent.id, ctx.agent.inbox_cursor)?;
-    ctx.user_reply_pending |= crate::turn::has_direct_user_message(&pending_inbox);
+    let queued_inbox = runtime.store.inbox(ctx.agent.id, ctx.agent.inbox_cursor)?;
+    // Messages whose images would not fit one input line stay queued: they
+    // are steered in mid-turn or open the next turn.
+    let pending_inbox = aether_context::render::deliverable_prefix(&queued_inbox);
+    ctx.user_reply_pending |= crate::turn::has_direct_user_message(pending_inbox);
     let pending_approvals: Vec<ApprovalRequest> = runtime
         .store
         .pending_approvals()?
@@ -119,7 +122,7 @@ pub(crate) async fn execute(
         task: ctx.task.as_ref(),
         children: &children,
         child_tasks: &child_tasks,
-        pending_inbox: &pending_inbox,
+        pending_inbox,
         pending_approvals: &pending_approvals,
         checkpoint: carried.as_ref(),
         transcript: &transcript,
@@ -129,6 +132,7 @@ pub(crate) async fn execute(
         engine_policy: None,
         capabilities: &resolved.model.capabilities,
         adapter: &adapter,
+        attachment_dir: runtime.attachment_dir(),
         turn: ctx.turn,
         now: now(),
     };
@@ -157,6 +161,11 @@ pub(crate) async fn execute(
             .filter(|text| !text.trim().is_empty())
             .unwrap_or_else(|| "Continue with your task.".into())
     };
+    let images = assembled
+        .new_user_message
+        .as_ref()
+        .map(|message| runtime.engine_images(message))
+        .unwrap_or_default();
     // A retained session already holds what it was sent, so an unchanged
     // task or checkpoint is not repeated into it; the nonce marks this
     // turn's harness blocks as unforgeable by earlier-written content.
@@ -215,6 +224,7 @@ pub(crate) async fn execute(
     let tool_ctx = Arc::new(tool_context(runtime, ctx));
     let mut turn = EngineTurn {
         prompt,
+        images,
         system_prompt,
         session: ctx.agent.engine_session.clone(),
         session_usage: ctx.agent.engine_session_usage(),
@@ -404,6 +414,8 @@ pub(crate) async fn execute(
                 delivered = true;
                 pending_prompt = super::transient::continuation_note(class);
                 turn.prompt.clone_from(&pending_prompt);
+                // The session holds the message's images with its prompt.
+                turn.images.clear();
             }
             super::transient::Resume::Recheck => {
                 delivered = true;

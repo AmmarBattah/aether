@@ -4,6 +4,43 @@ What each release of Aether brings, newest first. Aether follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The section of a
 release is also the text of its GitHub release.
 
+## Unreleased
+
+### Images on a message
+
+- Attach screenshots and other images to a message. In the terminal UI,
+  paste or drop an image file's path, type `/image PATH`, or press Alt+V for
+  the image on the clipboard; each shows as a chip above the draft until the
+  message is sent. From a script, `aether send --image FILE` (repeatable).
+- Claude Code and Codex agents receive the image itself, as do API models
+  that take images. The message text always names the stored file, so an
+  agent on a model without vision can still open it.
+- PNG, JPEG, GIF and WebP; up to 10 images of 3.75 MiB each and 10 MiB per
+  message, checked by the daemon with a clear error.
+- Protocol 19: `send_message` takes `attachments`. A text-only message is
+  unchanged on the wire. The daemon serves 17, 18 and 19; older clients,
+  the phone web app among them, read each image as a line of text.
+- The phone web app does not attach images yet.
+- Messages that wait in an agent's inbox together are handed over one
+  message's worth of images at a time (10 images, 10 MiB), so several
+  screenshots sent in a row cannot outgrow one engine input line. The rest
+  follow as soon as the engine takes input, or open the next turn.
+- An API model's request carries the newest 20 images and 15 MiB of them,
+  counted across the whole history; older images become a line naming the
+  stored file. A long conversation with many screenshots therefore stays
+  inside the provider's request size.
+- The generated Python and TypeScript types of an `image_ref` content block
+  carry its `id`, `media_type`, `size_bytes` and `name`.
+
+### Before updating
+
+- **Store schema 19.** No table changes: the step marks a store whose records
+  may hold image references, which an older binary cannot read. The migration
+  is one way: Aether saves the old database first (see
+  [migration backups](https://github.com/mengsig/aether/blob/main/docs/migration-backups.md)), and a binary that predates
+  schema 19 refuses to open a migrated database. To go back, stop the daemon
+  and restore that backup with the older binary; changes made since are lost.
+
 ## 1.0.2
 
 A fix for sign-in on machines where `~/.config/aether` was created writable by
