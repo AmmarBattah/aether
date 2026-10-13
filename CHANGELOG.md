@@ -32,6 +32,17 @@ release is also the text of its GitHub release.
 - The generated Python and TypeScript types of an `image_ref` content block
   carry its `id`, `media_type`, `size_bytes` and `name`.
 
+### Fixed
+
+- **A retried image send is answered from its receipt first.** A send whose
+  idempotency key was already delivered, to one agent or a subtree, and a
+  `resolve_submission` for it are answered before any image is decoded or
+  stored. A retry no longer needs the attachment directory, a resolution never
+  writes to it, and a send the daemon refuses leaves no image file behind.
+- **The phone web app's layout test no longer times out on CI.** The mock
+  daemon's shutdown waited on a connection the browser had opened and never
+  used. It now closes every connection.
+
 ### Before updating
 
 - **Store schema 19.** No table changes: the step marks a store whose records
