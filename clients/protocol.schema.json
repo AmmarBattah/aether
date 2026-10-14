@@ -8860,7 +8860,7 @@
       "oneOf": [
         {
           "const": "operator",
-          "description": "A person on this machine. An operator read out of an import acted on\nanother machine, so - as in the prompt's labels - it is not this one's.",
+          "description": "An operator of this daemon, local or authenticated remotely. An imported\noperator acted on another daemon, so - like the prompt's label - it does not count.",
           "type": "string"
         }
       ]

@@ -484,9 +484,18 @@ fn recorded_ids(store: &SqliteStore, query: MemoryQuery) -> BTreeSet<MemoryId> {
         .collect()
 }
 
+fn operator_query() -> MemoryQuery {
+    MemoryQuery {
+        recorded_by: Some(aether_core::memory::MemoryRecorder::Operator),
+        include_forgotten: true,
+        include_superseded: true,
+        limit: 100,
+        ..Default::default()
+    }
+}
+
 #[test]
-fn recorded_by_operator_matches_only_this_machines_operator() {
-    use aether_core::memory::MemoryRecorder;
+fn recorded_by_operator_matches_only_this_daemons_operator() {
     let f = recorder_fixture();
     let raw: Vec<String> = f
         .store
@@ -501,37 +510,50 @@ fn recorded_by_operator_matches_only_this_machines_operator() {
         .collect::<std::result::Result<_, _>>()
         .expect("rows");
     assert_eq!(raw, ["user"], "the stored actor tag the filter reads");
-    let operator = MemoryQuery {
-        recorded_by: Some(MemoryRecorder::Operator),
-        include_forgotten: true,
-        include_superseded: true,
-        limit: 100,
-        ..Default::default()
+    let everything = MemoryQuery {
+        recorded_by: None,
+        ..operator_query()
     };
-    let everything = recorded_ids(
-        &f.store,
-        MemoryQuery {
-            recorded_by: None,
-            ..operator.clone()
-        },
-    );
-    assert_eq!(everything.len(), 9);
+    assert_eq!(recorded_ids(&f.store, everything).len(), 9);
     let all = BTreeSet::from([
         f.operator_global,
         f.operator_repo,
         f.operator_forgotten,
         f.operator_superseded,
     ]);
-    assert_eq!(recorded_ids(&f.store, operator.clone()), all);
+    assert_eq!(recorded_ids(&f.store, operator_query()), all);
+}
+
+#[test]
+fn recorded_by_keeps_history_out_unless_asked() {
+    let f = recorder_fixture();
     let current = MemoryQuery {
         include_forgotten: false,
         include_superseded: false,
-        ..operator.clone()
+        ..operator_query()
     };
     assert_eq!(
-        recorded_ids(&f.store, current.clone()),
+        recorded_ids(&f.store, current),
         BTreeSet::from([f.operator_global, f.operator_repo])
     );
+    let forgotten = MemoryQuery {
+        include_superseded: false,
+        ..operator_query()
+    };
+    assert_eq!(
+        recorded_ids(&f.store, forgotten),
+        BTreeSet::from([f.operator_global, f.operator_repo, f.operator_forgotten])
+    );
+}
+
+#[test]
+fn recorded_by_composes_with_scope_and_kind() {
+    let f = recorder_fixture();
+    let current = MemoryQuery {
+        include_forgotten: false,
+        include_superseded: false,
+        ..operator_query()
+    };
     let in_repo = MemoryQuery {
         scope: Some(f.repo.clone()),
         exact_scope: true,
@@ -549,6 +571,7 @@ fn recorded_by_operator_matches_only_this_machines_operator() {
         recorded_ids(&f.store, constraints),
         BTreeSet::from([f.operator_repo])
     );
+    // Without `exact_scope` the repository also sees global memories.
     let visible = MemoryQuery {
         scope: Some(f.repo.clone()),
         kinds: vec![MemoryKind::Preference],
@@ -558,6 +581,67 @@ fn recorded_by_operator_matches_only_this_machines_operator() {
         recorded_ids(&f.store, visible),
         BTreeSet::from([f.operator_global])
     );
+}
+
+/// A remote operator's memory, ranked below a pinned agent memory that
+/// matches the same text and tag.
+fn outranked_device_memory(store: &SqliteStore) -> MemoryId {
+    let device = Actor::User {
+        name: None,
+        origin: Some(aether_core::event::OperatorOrigin::Device {
+            device: aether_core::id::DeviceId::new(),
+            name: "phone".into(),
+            connection: "c2".into(),
+        }),
+    };
+    let mut operator = memory_by(&MemoryScope::Global, MemoryKind::Fact, actor(device));
+    operator.importance = 0.1;
+    operator.tags = vec!["deploy".into()];
+    let mut agent = memory_by(
+        &MemoryScope::Global,
+        MemoryKind::Fact,
+        actor(Actor::agent(AgentId::new())),
+    );
+    agent.pinned = true;
+    agent.importance = 1.0;
+    agent.tags = vec!["deploy".into()];
+    let id = operator.id;
+    let commit = Commit::new()
+        .mutate(Mutation::PutMemory(agent))
+        .mutate(Mutation::PutMemory(operator));
+    store.commit(commit).expect("commit");
+    id
+}
+
+/// The filter sits in the WHERE clause of both the plain and the full-text
+/// query, so a better-ranked memory by someone else cannot use up the limit.
+#[test]
+fn recorded_by_filters_before_the_limit_with_and_without_text() {
+    let store = SqliteStore::open_in_memory().expect("open");
+    let operator = outranked_device_memory(&store);
+    let top = MemoryQuery {
+        limit: 1,
+        ..Default::default()
+    };
+    assert_ne!(
+        recorded_ids(&store, top.clone()),
+        BTreeSet::from([operator]),
+        "the agent memory ranks first unfiltered"
+    );
+    let plain = MemoryQuery {
+        recorded_by: Some(aether_core::memory::MemoryRecorder::Operator),
+        tags: vec!["deploy".into()],
+        ..top
+    };
+    assert_eq!(
+        recorded_ids(&store, plain.clone()),
+        BTreeSet::from([operator])
+    );
+    let searched = MemoryQuery {
+        text: Some("resolved identity".into()),
+        ..plain
+    };
+    assert_eq!(recorded_ids(&store, searched), BTreeSet::from([operator]));
 }
 
 /// The SQL clause and the Rust predicate name the same records.

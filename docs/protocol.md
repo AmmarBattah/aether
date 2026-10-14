@@ -157,12 +157,13 @@ recorder authored, for example what the operator taught for a scope:
 ```
 
 The only recorder is `operator`: a memory whose runtime-recorded
-`provenance.actor` is a person on this machine (`{"actor": "user", ...}`),
-which is what `create_memory` records. Memories an agent remembered, notes
+`provenance.actor` is an operator of this daemon (`{"actor": "user", ...}`),
+which is what `create_memory` records. That includes an operator who
+authenticated remotely, over TCP or from a paired device. Memories an agent remembered, notes
 synced from a repository's files (even when an operator ran the sync) and
 system-recorded memories do not match. Neither does an operator memory read
 out of an import (`{"actor": "imported", "was": {"actor": "user"}}`): that
-person acted on another machine, and the prompt labels such a memory
+person acted on another daemon, and the prompt labels such a memory
 `imported`, not `operator`. The filter combines with every other field, so
 `scope`, `kinds`, `include_superseded` and `include_forgotten` narrow it as
 usual. An unknown recorder is refused with a decode error. Check the

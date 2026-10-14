@@ -17,8 +17,8 @@ pub(crate) enum MemoryCmd {
         /// Only memories carrying this tag; repeat for several.
         #[arg(long)]
         tag: Vec<String>,
-        /// Only memories this kind of recorder authored. `operator`: filed by
-        /// a person on this machine, not imported and not a repository note.
+        /// Only memories this kind of recorder authored. `operator`: filed by an
+        /// operator of this daemon (local or remote), not imported, not a repo note.
         #[arg(long, value_parser = cli::parse_memory_recorder)]
         recorded_by: Option<aether_core::memory::MemoryRecorder>,
         /// Include superseded and forgotten memories.

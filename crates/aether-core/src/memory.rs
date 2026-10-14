@@ -131,8 +131,8 @@ pub struct MemoryProvenance {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryRecorder {
-    /// A person on this machine. An operator read out of an import acted on
-    /// another machine, so - as in the prompt's labels - it is not this one's.
+    /// An operator of this daemon, local or authenticated remotely. An imported
+    /// operator acted on another daemon, so - like the prompt's label - it does not count.
     Operator,
 }
 
