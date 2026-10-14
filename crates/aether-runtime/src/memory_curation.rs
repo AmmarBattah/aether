@@ -118,7 +118,7 @@ impl Runtime {
                 repository,
                 role,
             } => {
-                let id = self.operator_repository(root, repository)?;
+                // The role is checked first: resolving a root reads the filesystem and runs git.
                 let role = operator_role(&role)?;
                 if role.split('.').count() > MAX_ROLE_SEGMENTS || role.split('.').any(str::is_empty)
                 {
@@ -127,6 +127,7 @@ impl Runtime {
                          nonempty segments"
                     )));
                 }
+                let id = self.operator_repository(root, repository)?;
                 MemoryScope::RepositoryRole { id, role }
             }
         })

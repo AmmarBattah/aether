@@ -267,7 +267,8 @@ impl Store for SqliteStore {
     }
 
     fn any_agent_in_repository(&self, repository: &str) -> Result<bool> {
-        Ok(self.conn.lock().query_row(
+        // A miss scans every agent, so it must not hold the writer while it does.
+        Ok(self.read_conn().query_row(
             "SELECT EXISTS(SELECT 1 FROM agents WHERE json_extract(body, '$.scope.repository') = ?1)",
             [repository],
             |row| row.get(0),
