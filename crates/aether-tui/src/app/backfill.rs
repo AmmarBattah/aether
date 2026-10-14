@@ -379,6 +379,11 @@ fn page_request(agent: AgentId, before: Option<u64>) -> Effect {
             query: EventQuery {
                 agent: Some(agent),
                 before: Some(before.unwrap_or(u64::MAX)),
+                // Child activity the transcript never shows would crowd the
+                // agent's own turns off the page.
+                child_types: transcript::PARENT_VISIBLE_CHILD_TYPES
+                    .map(String::from)
+                    .into(),
                 ..EventQuery::default()
             },
         },

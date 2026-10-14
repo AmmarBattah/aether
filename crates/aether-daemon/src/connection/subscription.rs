@@ -24,9 +24,11 @@ fn delta_matches(
         let Some(row) = store.agent(agent)? else {
             return Ok(false);
         };
+        // A child's deltas are of no type, so no `child_types` list takes them.
+        let children = !filter.exclude_children && filter.child_types.is_empty();
         if filter
             .agent
-            .is_some_and(|id| id != agent && (filter.exclude_children || row.parent != Some(id)))
+            .is_some_and(|id| id != agent && (!children || row.parent != Some(id)))
             || filter.run.is_some_and(|run| row.run != run)
         {
             return Ok(false);
@@ -422,6 +424,11 @@ mod device_tests {
                 task: Some(aether_core::id::TaskId::new()),
                 ..Default::default()
             }),
+            only(EventFilter {
+                agent: Some(root.id),
+                child_types: vec!["agent.completed".into()],
+                ..Default::default()
+            }),
         ]
     }
 
@@ -444,6 +451,21 @@ mod device_tests {
                 "{filter:?}"
             );
         }
+        let narrowed = EventFilter {
+            agent: Some(root.id),
+            child_types: vec!["agent.completed".into()],
+            ..Default::default()
+        };
+        assert!(
+            delta_matches(
+                daemon.runtime.store().as_ref(),
+                &narrowed,
+                root.id,
+                InvocationId::new(),
+                &control
+            ),
+            "the agent's own deltas still stream"
+        );
         daemon.runtime.shutdown().await;
     }
 }

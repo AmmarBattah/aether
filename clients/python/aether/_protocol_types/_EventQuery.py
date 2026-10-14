@@ -9,6 +9,7 @@ from .. import protocol as _protocol
 class EventQuery(TypedDict, total=False):
     agent: _protocol.AgentId | None  # optional
     before: int | None  # optional
+    child_types: list[str]  # optional
     families: list[str]  # optional
     run: _protocol.RunId | None  # optional
     task: _protocol.TaskId | None  # optional

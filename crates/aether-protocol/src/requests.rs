@@ -172,6 +172,12 @@ pub struct EventQuery {
     pub families: Vec<String>,
     #[serde(default)]
     pub types: Vec<String>,
+    /// With `agent`: the only event types taken from its children, so a
+    /// history page is not spent on child activity the client never shows.
+    /// The agent's own events are unaffected. Empty takes every type.
+    /// A daemon older than this field ignores it and sends every type.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub child_types: Vec<String>,
 }
 
 impl From<EventQuery> for aether_store::EventFilter {
@@ -184,6 +190,7 @@ impl From<EventQuery> for aether_store::EventFilter {
             run: q.run,
             families: q.families,
             types: q.types,
+            child_types: q.child_types,
         }
     }
 }

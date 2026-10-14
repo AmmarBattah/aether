@@ -250,6 +250,8 @@ mod streaming;
 
 mod backfill;
 
+mod parent_history;
+
 mod tool_results;
 
 mod approvals;

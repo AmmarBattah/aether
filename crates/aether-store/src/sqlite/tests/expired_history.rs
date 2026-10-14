@@ -179,3 +179,23 @@ fn before_pages_check_expiry_only_inside_the_requested_window() {
         .unwrap();
     assert_eq!(events.iter().map(|e| e.seq).collect::<Vec<_>>(), [2]);
 }
+
+#[test]
+fn child_types_check_expiry_only_for_the_child_types_requested() {
+    let (store, _, _, parent, _, _) = fixture();
+    let with_children = |types: &[&str]| EventFilter {
+        agent: Some(parent),
+        child_types: types.iter().map(|t| t.to_string()).collect(),
+        ..Default::default()
+    };
+    let shown = store
+        .events_before(u64::MAX, 100, &with_children(&["agent.completed"]))
+        .expect("no expired child event of a requested type");
+    assert_eq!(shown.iter().map(|e| e.seq).collect::<Vec<_>>(), [4, 2]);
+    for types in [&[][..], &["custom"][..]] {
+        assert!(matches!(
+            store.events_before(u64::MAX, 100, &with_children(types)),
+            Err(StoreError::HistoryExpired { .. })
+        ));
+    }
+}

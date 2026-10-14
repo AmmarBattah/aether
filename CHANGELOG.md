@@ -4,6 +4,19 @@ What each release of Aether brings, newest first. Aether follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The section of a
 release is also the text of its GitHub release.
 
+## Unreleased
+
+### Fixed
+
+- **A parent's terminal history is no longer crowded out by its children's
+  tool activity.** Opening an agent fetched its newest 5,000 events together
+  with its children's, though a child's tool calls draw nothing in the parent.
+  A parent with 300 turns whose child then made 2,600 tool calls opened on
+  none of its turns and had to page up to reach them. History pages now take
+  only the child events the parent's transcript shows, and the same parent
+  opens on all 300. An older daemon ignores the narrower request and pages as
+  before.
+
 ## 1.0.5
 
 Claude Code agents can opt into a leaner start that skips the operator's

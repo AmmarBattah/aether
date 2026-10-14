@@ -395,6 +395,102 @@ fn before_cursor_returns_bounded_newest_events_in_reverse_order() {
     );
 }
 
+/// Seqs 1..=12 cycle through the parent's `agent.ready`, its child's
+/// `agent.ready` and `agent.completed`, and an unrelated agent's completion.
+fn family_events() -> (SqliteStore, AgentId, Vec<Event>) {
+    let store = SqliteStore::open_in_memory().unwrap();
+    let (parent, child, stranger) = (AgentId::new(), AgentId::new(), AgentId::new());
+    for n in 0..12 {
+        let ready = EventDraft::new(Actor::System, EventKind::AgentReady);
+        let completed = EventDraft::new(Actor::System, EventKind::AgentCompleted { summary: None });
+        let draft = match n % 4 {
+            0 => ready.agent(parent),
+            1 => ready.agent(child).parent(Some(parent)),
+            2 => completed.agent(child).parent(Some(parent)),
+            _ => completed.agent(stranger),
+        };
+        store.commit(Commit::new().event(draft)).unwrap();
+    }
+    let events = store.events(0, 100, &EventFilter::all()).unwrap();
+    assert_eq!(events.len(), 12);
+    (store, parent, events)
+}
+
+#[test]
+fn child_types_narrow_only_the_childrens_events() {
+    let (store, parent, events) = family_events();
+    let filter = EventFilter {
+        agent: Some(parent),
+        child_types: vec!["agent.completed".into()],
+        ..Default::default()
+    };
+    // The parent's own `agent.ready` stays; its child's does not.
+    let expected: Vec<u64> = events
+        .iter()
+        .filter(|e| e.seq % 4 == 1 || e.seq % 4 == 3)
+        .map(|e| e.seq)
+        .collect();
+    assert_eq!(expected, [1, 3, 5, 7, 9, 11]);
+    let seqs = |events: Vec<Event>| events.into_iter().map(|e| e.seq).collect::<Vec<_>>();
+    assert_eq!(seqs(store.events(0, 100, &filter).unwrap()), expected);
+    assert_eq!(seqs(store.events(3, 2, &filter).unwrap()), [5, 7]);
+    let mut paged = Vec::new();
+    let mut before = u64::MAX;
+    loop {
+        let page = seqs(store.events_before(before, 2, &filter).unwrap());
+        assert!(
+            page.windows(2).all(|pair| pair[0] > pair[1]),
+            "newest first"
+        );
+        let Some(&oldest) = page.last() else { break };
+        paged.extend(page);
+        before = oldest;
+    }
+    paged.reverse();
+    assert_eq!(paged, expected, "pages neither skip nor repeat");
+    for event in &events {
+        assert_eq!(
+            filter.matches(event),
+            expected.contains(&event.seq),
+            "{}",
+            event.seq
+        );
+    }
+    let own = EventFilter {
+        exclude_children: true,
+        ..filter.clone()
+    };
+    assert_eq!(
+        seqs(store.events_before(u64::MAX, 100, &own).unwrap()),
+        [9, 5, 1]
+    );
+}
+
+#[test]
+fn empty_child_types_take_every_child_event() {
+    let (store, parent, events) = family_events();
+    let filter = EventFilter::for_agent(parent);
+    assert!(filter.child_types.is_empty());
+    let expected: Vec<u64> = events
+        .iter()
+        .filter(|e| e.seq % 4 != 0)
+        .map(|e| e.seq)
+        .collect();
+    let seqs = |events: Vec<Event>| events.into_iter().map(|e| e.seq).collect::<Vec<_>>();
+    assert_eq!(seqs(store.events(0, 100, &filter).unwrap()), expected);
+    let mut newest_first = expected.clone();
+    newest_first.reverse();
+    assert_eq!(
+        seqs(store.events_before(u64::MAX, 100, &filter).unwrap()),
+        newest_first
+    );
+    assert!(
+        events
+            .iter()
+            .all(|e| filter.matches(e) == expected.contains(&e.seq))
+    );
+}
+
 #[test]
 fn before_cursor_uses_the_agent_sequence_index() {
     let store = SqliteStore::open_in_memory().unwrap();

@@ -111,12 +111,19 @@ fn filter_predicate_with_agent(
     if let Some(agent) = filter.agent {
         args.push(Box::new(agent.to_string()));
         let n = args.len();
-        if let Some(column) = agent_column {
-            sql.push_str(&format!(" AND {column} = ?{n}"));
-        } else if filter.exclude_children {
-            sql.push_str(&format!(" AND agent_id = ?{n}"));
-        } else {
-            sql.push_str(&format!(" AND (agent_id = ?{n} OR parent_agent_id = ?{n})"));
+        match agent_column {
+            Some("parent_agent_id") => {
+                let types = child_types(filter, args);
+                sql.push_str(&format!(" AND parent_agent_id = ?{n}{types}"));
+            }
+            Some(column) => sql.push_str(&format!(" AND {column} = ?{n}")),
+            None if filter.exclude_children => sql.push_str(&format!(" AND agent_id = ?{n}")),
+            None => {
+                let types = child_types(filter, args);
+                sql.push_str(&format!(
+                    " AND (agent_id = ?{n} OR (parent_agent_id = ?{n}{types}))"
+                ));
+            }
         }
     }
     for (column, value) in [
@@ -130,15 +137,29 @@ fn filter_predicate_with_agent(
     }
     for (column, values) in [("family", &filter.families), ("type", &filter.types)] {
         if !values.is_empty() {
-            let placeholders: Vec<_> = values
-                .iter()
-                .map(|value| {
-                    args.push(Box::new(value.clone()));
-                    format!("?{}", args.len())
-                })
-                .collect();
-            sql.push_str(&format!(" AND {column} IN ({})", placeholders.join(",")));
+            sql.push_str(&format!(" AND {}", in_list(column, values, args)));
         }
     }
     sql
+}
+
+/// The clause narrowing the children's events to `child_types`, if any.
+fn child_types(filter: &EventFilter, args: &mut Arguments) -> String {
+    if filter.child_types.is_empty() {
+        return String::new();
+    }
+    format!(" AND {}", in_list("type", &filter.child_types, args))
+}
+
+/// `column IN (...)` over `values`, bound as arguments.
+fn in_list(column: &str, values: &[String], args: &mut Arguments) -> String {
+    debug_assert!(!values.is_empty(), "an empty IN list matches nothing");
+    let placeholders: Vec<_> = values
+        .iter()
+        .map(|value| {
+            args.push(Box::new(value.clone()));
+            format!("?{}", args.len())
+        })
+        .collect();
+    format!("{column} IN ({})", placeholders.join(","))
 }

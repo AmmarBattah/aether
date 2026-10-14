@@ -10,6 +10,7 @@ import type {
 export interface EventQuery {
   "agent"?: AgentId | null;
   "before"?: number | null;
+  "child_types"?: Array<string>;
   "families"?: Array<string>;
   "run"?: RunId | null;
   "task"?: TaskId | null;

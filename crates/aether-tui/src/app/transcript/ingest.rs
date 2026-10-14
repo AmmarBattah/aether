@@ -785,7 +785,111 @@ pub(in crate::app) fn ingest_replay_event(
     alert
 }
 
+/// The types of a child's events that can change its parent's transcript,
+/// directly or through the child state the parent's cells read. History pages
+/// take only these from children; `route_event` asserts no other type does.
+pub(in crate::app) const PARENT_VISIBLE_CHILD_TYPES: [&str; 14] = [
+    "agent.created",        // the spawn cell; the child's name and model
+    "agent.config_updated", // a rename or model the parent's cells name
+    "agent.started",        // a new run gets its own result cell
+    "agent.usage_updated",  // the session's and the result's cost
+    "agent.completed",
+    "agent.failed",
+    "agent.cancelled",
+    "task.created",  // the spawn cell's objective; the child's task
+    "task.assigned", // which child a wait on a task names
+    "task.completed",
+    "task.failed",
+    "task.cancelled",
+    "invocation.failed", // a spent quota, shown on the child's failure
+    "message.sent",      // the parent's own message to its child
+];
+
+/// What a child's event can change that its parent shows, now or later.
+#[derive(Debug, PartialEq)]
+struct ParentView {
+    parent: Option<ParentFacts>,
+    child: ChildFacts,
+}
+
+/// The parent's cells, live cell, and the session and spend it renders.
+#[derive(Debug, PartialEq)]
+struct ParentFacts {
+    next_id: u64,
+    committed: u64,
+    active: Option<(CellId, CellRevision)>,
+    session: Option<Session>,
+    subtree: Option<Cost>,
+}
+
+/// What the parent's result, wait and message cells read from the child.
+#[derive(Debug, PartialEq, Default)]
+struct ChildFacts {
+    who: Identity,
+    quota: Option<String>,
+    spent: Option<Cost>,
+    subtree: Option<Cost>,
+    result_cell: Option<CellId>,
+}
+
+impl ParentView {
+    /// None unless a child emitted `event`. Live eviction of an archived
+    /// child drops state that replay keeps; the parent shows neither.
+    fn of(transcripts: &Transcripts, event: &Event, evict_archived: bool) -> Option<Self> {
+        let (parent, child) = (event.parent_agent_id?, event.agent_id?);
+        if evict_archived && matches!(event.kind, EventKind::AgentArchived { archived: true }) {
+            return None;
+        }
+        let parent = transcripts.get(&parent).map(|t| ParentFacts {
+            next_id: t.next_id,
+            committed: t.committed,
+            active: t.active.as_ref().map(|cell| (cell.id, cell.revision)),
+            session: t.private.session.clone(),
+            subtree: t.private.subtree,
+        });
+        let child = transcripts
+            .get(&child)
+            .map_or_else(ChildFacts::default, |t| {
+                let p = &t.private;
+                ChildFacts {
+                    // Every event of the child names its parent: no change alone.
+                    who: Identity {
+                        parent: None,
+                        ..p.who.clone()
+                    },
+                    quota: p.quota.clone(),
+                    spent: p.spent,
+                    subtree: p.subtree,
+                    result_cell: p.result_cell,
+                }
+            });
+        Some(Self { parent, child })
+    }
+}
+
 fn route_event(
+    transcripts: &mut Transcripts,
+    event: &Event,
+    ctx: &IngestCtx<'_>,
+    evict_archived: bool,
+) -> Option<String> {
+    let before = cfg!(debug_assertions)
+        .then(|| ParentView::of(transcripts, event, evict_archived))
+        .flatten();
+    let alert = route_to_transcripts(transcripts, event, ctx, evict_archived);
+    if let Some(before) = before
+        && ParentView::of(transcripts, event, evict_archived).as_ref() != Some(&before)
+    {
+        let kind = event.kind.type_name();
+        debug_assert!(
+            PARENT_VISIBLE_CHILD_TYPES.contains(&kind.as_str()),
+            "a child's {kind} changed its parent's transcript; history pages leave it out"
+        );
+    }
+    alert
+}
+
+fn route_to_transcripts(
     transcripts: &mut Transcripts,
     event: &Event,
     ctx: &IngestCtx<'_>,

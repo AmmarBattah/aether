@@ -482,3 +482,23 @@ fn event_query_before_is_optional_and_old_wire_shape_is_unchanged() {
     let query: EventQuery = serde_json::from_value(serde_json::json!({"before": 42})).unwrap();
     assert_eq!(query.before, Some(42));
 }
+
+#[test]
+fn event_query_child_types_reach_the_store_and_older_daemons_ignore_them() {
+    let agent = aether_core::id::AgentId::new();
+    let wire = serde_json::json!({"agent": agent, "child_types": ["task.completed"]});
+    let query: EventQuery = serde_json::from_value(wire.clone()).unwrap();
+    assert_eq!(
+        serde_json::to_value(&query).unwrap()["child_types"],
+        wire["child_types"]
+    );
+    let filter: aether_store::EventFilter = query.into();
+    assert_eq!(filter.agent, Some(agent));
+    assert_eq!(filter.child_types, ["task.completed"]);
+    assert!(!filter.exclude_children, "children stay, narrowed");
+    // 1.0.5's query had these attributes without the field: an unknown key
+    // is dropped, so such a daemon answers with every child event.
+    let newer = serde_json::json!({"types": [], "families": [], "from_a_newer_client": [1]});
+    let query: EventQuery = serde_json::from_value(newer).unwrap();
+    assert_eq!(query, EventQuery::default());
+}

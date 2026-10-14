@@ -98,6 +98,40 @@ fn parent_backfill_preserves_child_spawn_link() {
     assert!(app.transcripts[&parent].all_cells().any(|c| matches!(&c.model, CellModel::Spawned { objective, .. } if objective == "review this code")), "spawn link still targets old parent cell id: {:?}", app.transcripts[&parent].cells);
 }
 
+fn history_query(effect: Option<Effect>) -> EventQuery {
+    match effect {
+        Some(Effect::Request {
+            command: Command::GetEvents { query, .. },
+            then: Then::Backfill(_),
+        }) => query,
+        other => panic!("a history request: {other:?}"),
+    }
+}
+
+#[test]
+fn history_pages_ask_only_for_child_events_the_transcript_shows() {
+    let (mut app, id) = app_with_agent();
+    app.transcripts.get_mut(&id).unwrap().loaded = false;
+    let first = history_query(app.backfill_request(id));
+    let shown: Vec<String> = crate::app::transcript::PARENT_VISIBLE_CHILD_TYPES
+        .map(String::from)
+        .into();
+    assert_eq!(first.agent, Some(id));
+    assert_eq!(first.child_types, shown);
+    assert!(!shown.iter().any(|t| t.starts_with("tool.")), "{shown:?}");
+    app.reduce(AppEvent::Reply {
+        then: Then::Backfill(id),
+        result: Ok(Reply::Events(vec![event(7, id, EventKind::AgentReady)])),
+    });
+    app.transcripts.get_mut(&id).unwrap().older_available = true;
+    let older = history_query(app.older_history_request(id));
+    assert_eq!(older.before, Some(7));
+    assert_eq!(
+        older.child_types, shown,
+        "older pages narrow children alike"
+    );
+}
+
 #[test]
 fn latest_window_deduplicates_live_overlap_and_stays_bounded() {
     let (mut app, id) = app_with_agent();

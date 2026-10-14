@@ -103,6 +103,32 @@ A client must check that the `Welcome` lists `host_context` before sending
 `config.host_context`: an older daemon silently ignores the field and creates
 a full agent.
 
+## Narrowing a child's events
+
+`get_events` and `subscribe` take an event query. With `agent`, it matches the
+agent's own events and its children's: those whose `parent_agent_id` is the
+agent. `child_types` lists the only event types taken from the children:
+
+```json
+{"req": 9, "cmd": "get_events", "after": 0, "limit": 5000,
+ "query": {"agent": "agt_...", "before": 18446744073709551615,
+           "child_types": ["agent.created", "task.completed", "message.sent"]}}
+```
+
+The agent's own events are unaffected, and `families` and `types` still
+apply to both. Empty, the default, takes every type, and is left off the wire.
+A history page then spends its `limit` on what the client shows rather than
+on a busy child's tool calls: the terminal asks for the types that draw in a
+parent's transcript (`PARENT_VISIBLE_CHILD_TYPES` in `aether-tui`). Expired
+history is reported only when an expired event matches the narrowed query. A
+subscription with `child_types` leaves out the children's streaming deltas,
+which have no type.
+
+An older daemon ignores the field and answers with every child event, as it
+always did: the event query never refused unknown fields. No `Welcome`
+feature is needed, and a client talking to such a daemon gets the pages it
+got before.
+
 ## Images on a message
 
 Protocol 19 lets `send_message` carry images next to its text:

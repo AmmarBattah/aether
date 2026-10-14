@@ -7098,6 +7098,13 @@
             "null"
           ]
         },
+        "child_types": {
+          "description": "With `agent`: the only event types taken from its children, so a\nhistory page is not spent on child activity the client never shows.\nThe agent's own events are unaffected. Empty takes every type.\nA daemon older than this field ignores it and sends every type.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "families": {
           "default": [],
           "items": {

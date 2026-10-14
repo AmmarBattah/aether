@@ -267,6 +267,9 @@ pub struct EventFilter {
     pub families: Vec<String>,
     /// Exact types such as `task.completed`.
     pub types: Vec<String>,
+    /// With `agent` and children included, the only types taken from the
+    /// children; the agent's own events are unaffected. Empty takes every type.
+    pub child_types: Vec<String>,
 }
 
 impl EventFilter {
@@ -302,7 +305,10 @@ impl EventFilter {
     pub fn matches(&self, event: &Event) -> bool {
         if let Some(a) = self.agent {
             let own = event.agent_id == Some(a);
-            let child = !self.exclude_children && event.parent_agent_id == Some(a);
+            let child = !self.exclude_children
+                && event.parent_agent_id == Some(a)
+                && (self.child_types.is_empty()
+                    || self.child_types.contains(&event.kind.type_name()));
             if !own && !child {
                 return false;
             }
