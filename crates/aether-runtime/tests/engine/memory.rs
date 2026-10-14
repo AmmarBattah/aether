@@ -122,6 +122,87 @@ async fn engine_memory_does_not_churn_with_each_message() {
     }
 }
 
+#[tokio::test]
+async fn forgotten_memory_is_excluded_and_restored_across_fresh_sessions() {
+    const STALE: &str = "Deploys go through the legacy jenkins pipeline";
+    const UNRELATED: &str = "The indexer batches rows in groups of five hundred";
+    let h = harness(Reply::Resumable).await;
+    let id = chat_agent(&h);
+    let agent = wait_for(h.store.as_ref(), id, |a| {
+        a.status.kind() == AgentStatusKind::Waiting
+    })
+    .await;
+    let stale_id = seed_repository_memory(&h, &agent, STALE);
+    let unrelated_id = seed_repository_memory(&h, &agent, UNRELATED);
+
+    let both = [(stale_id, STALE, true), (unrelated_id, UNRELATED, true)];
+    assert_fresh_session_memory(&h, &agent, "before forget", &both).await;
+
+    h.runtime
+        .forget_memory(
+            stale_id,
+            Some("The legacy deployment pipeline was retired".into()),
+            Actor::user(),
+        )
+        .expect("forget stale repository memory");
+    assert_fresh_session_memory(
+        &h,
+        &agent,
+        "after forget",
+        &[(stale_id, STALE, false), (unrelated_id, UNRELATED, true)],
+    )
+    .await;
+
+    h.runtime
+        .restore_memory(stale_id, Actor::user())
+        .expect("restore stale repository memory");
+    assert_fresh_session_memory(&h, &agent, "after restore", &both).await;
+    h.runtime.shutdown().await;
+}
+
+async fn assert_fresh_session_memory(
+    h: &Harness,
+    seed_agent: &aether_core::agent::Agent,
+    phase: &str,
+    memories: &[(aether_core::id::MemoryId, &str, bool)],
+) {
+    use aether_core::snapshot::LayerPlacement;
+
+    let id = chat_agent(h);
+    let agent = wait_for(h.store.as_ref(), id, |a| {
+        a.status.kind() == AgentStatusKind::Waiting
+    })
+    .await;
+    assert_eq!(
+        agent.stats.turns, 0,
+        "{phase}: the session has no prior turns"
+    );
+    assert_eq!(
+        agent.scope.repository, seed_agent.scope.repository,
+        "{phase}: the fresh agent uses the seeded repository"
+    );
+    engine_turn(h, id, "what should I know about this repository?").await;
+    let snapshot = latest_snapshot(h, id);
+    let prompt = h.prompts.lock().unwrap().last().expect("a turn").clone();
+    assert_eq!(
+        memory_layer(&snapshot).placement,
+        LayerPlacement::UserTurn,
+        "{phase}: a fresh session receives its memory in the user turn"
+    );
+    for (memory_id, text, present) in memories {
+        assert_eq!(
+            snapshot.memory_ids.contains(memory_id),
+            *present,
+            "{phase}: snapshot membership for {text:?} must be {present}"
+        );
+        assert_eq!(
+            prompt.contains(text),
+            *present,
+            "{phase}: engine prompt presence for {text:?} must be {present}: {prompt}"
+        );
+    }
+}
+
 /// Store a repository-scoped memory the agent's retrieval will find.
 fn seed_repository_memory(
     h: &Harness,
