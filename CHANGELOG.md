@@ -8,6 +8,10 @@ release is also the text of its GitHub release.
 
 ### Fixed
 
+- **Approval navigation returns to the requester's latest output.** Opening
+  an approval's requester from another agent, or denying an approval, now
+  restores its live transcript when an older history window was displayed.
+  New replies stay visible, and a pending older page cannot switch it back.
 - **A changed requirement is no longer mistaken for a duplicate memory.**
   Admission treated notes that shared most of their words as one note, and
   skipped negations, short words, case and punctuation, so "do not run cargo

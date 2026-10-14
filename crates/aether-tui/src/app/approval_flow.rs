@@ -401,8 +401,8 @@ impl App {
     }
 
     fn view_requester(&mut self, agent: AgentId) -> Vec<Effect> {
-        let effects = self.apply_view_actions(vec![ViewAction::ViewAgent(agent)]);
-        self.scroll_log.push(agent, ScrollIntent::Latest);
+        let mut effects = self.apply_view_actions(vec![ViewAction::ViewAgent(agent)]);
+        effects.extend(self.scroll(ScrollIntent::Latest));
         effects
     }
 

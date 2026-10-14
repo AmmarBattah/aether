@@ -6,6 +6,8 @@ use chrono::Duration;
 use crate::app::approval_flow::fixtures::read_card;
 use crate::app::approval_flow::{ApprovalAnswer, TYPING_GUARD_MS};
 
+mod history;
+
 fn approval_event(approval: ApprovalId, argument: &str) -> EventKind {
     EventKind::ApprovalRequested {
         approval,
