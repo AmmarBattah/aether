@@ -8,6 +8,10 @@ release is also the text of its GitHub release.
 
 ### Fixed
 
+- **Recalled memory shows its origin and date.** Ordinary memory lines name
+  the recorder category and creation date, and the prompt says current
+  instructions take precedence over recalled context. Imported and unknown
+  origins stay distinct; repository notes keep their untrusted file labels.
 - **An agent's replies stay in the terminal UI while its children are busy.**
   Every event of a child counted toward its parent's 5,000-event window, so a
   busy child trimmed the parent's own replies out of the transcript and left

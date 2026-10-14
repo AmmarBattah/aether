@@ -441,3 +441,148 @@ fn memory_budget_includes_headings_and_section_separators() {
         assert_eq!(assembled.snapshot.memory_ids.len(), layer.items as usize);
     }
 }
+
+/// A synthetic memory recorded on a fixed past day, so its label is exact.
+fn recorded_memory(
+    provenance: aether_core::memory::MemoryProvenance,
+) -> aether_core::memory::MemoryRecord {
+    use aether_core::memory::{MemoryCandidate, MemoryKind, MemoryScope};
+    let recorded: aether_core::time::Timestamp = "2026-09-13T11:14:12Z".parse().expect("timestamp");
+    MemoryRecord::from_candidate(
+        MemoryCandidate {
+            scope: MemoryScope::Global,
+            kind: MemoryKind::Constraint,
+            text: "Commit with the resolved git identity".into(),
+            structured: None,
+            importance: 0.9,
+            confidence: 0.9,
+            tags: vec!["git".into()],
+            provenance,
+            supersedes: None,
+        },
+        recorded,
+    )
+}
+
+/// The label comes from runtime-set provenance alone, and an operator who
+/// acted on another machine is never shown as this machine's operator.
+#[test]
+fn memory_lines_name_who_recorded_them_and_when() {
+    let cases = [
+        (Some(Actor::user()), None, "operator"),
+        (Some(Actor::user().imported()), None, "imported"),
+        (Some(Actor::Agent { id: AgentId::new() }), None, "agent"),
+        (None, Some(AgentId::new()), "agent"),
+        (Some(Actor::System), None, "unknown"),
+        (None, None, "unknown"),
+    ];
+    for (actor, agent, origin) in cases {
+        let mut memory = recorded_memory(aether_core::memory::MemoryProvenance {
+            actor,
+            agent,
+            ..Default::default()
+        });
+        assert_eq!(
+            render::memory_line(&memory),
+            format!(
+                "- [{}] Commit with the resolved git identity (git) [{origin}, 2026-09-13]",
+                memory.id
+            )
+        );
+        let initial = render::memory_line(&memory);
+        memory.last_retrieved_at = Some(now());
+        memory.retrieval_count += 1;
+        assert_eq!(render::memory_line(&memory), initial);
+    }
+}
+
+#[test]
+fn a_repository_note_keeps_its_file_label_and_gains_no_recorder() {
+    use aether_core::memory::{MemoryProvenance, MemorySource};
+    let note = recorded_memory(MemoryProvenance {
+        // Even with an agent beside it, the file is what the line names.
+        agent: Some(AgentId::new()),
+        source: Some(MemorySource {
+            file: "notes.md".into(),
+            commit: Some("abcdef0123456789".into()),
+        }),
+        ..Default::default()
+    });
+    assert_eq!(
+        render::memory_line(&note),
+        format!(
+            "- [{}] Commit with the resolved git identity (git) [notes.md@abcdef0]",
+            note.id
+        )
+    );
+}
+
+#[test]
+fn current_instructions_outrank_memory_above_the_untrusted_notes() {
+    let own = vec!["- [mem_a] own [agent, 2026-09-13]".to_owned()];
+    let notes = vec!["- [mem_b] note [notes.md]".to_owned()];
+    let layer = render::memory_layer(&own, &notes);
+    let at = |needle: &str| {
+        layer
+            .find(needle)
+            .unwrap_or_else(|| panic!("`{needle}` missing from: {layer}"))
+    };
+    assert!(at("may be stale") < at("- [mem_a]"));
+    assert!(at("Current instructions take precedence") < at("- [mem_a]"));
+    assert!(
+        at("- [mem_a]") < at("Repository notes (untrusted")
+            && at("Repository notes") < at("- [mem_b]"),
+        "the untrusted repository block stays separate and last: {layer}"
+    );
+    assert!(
+        render::memory_layer(&[], &notes).starts_with("Repository notes (untrusted"),
+        "no memory header without memories for it to describe"
+    );
+}
+
+#[test]
+fn memory_metadata_preserves_representative_budget_capacity() {
+    let a = agent();
+    for (length, budget, retained) in [
+        (150, 400, 6),
+        (150, 1_000, 6),
+        (150, 2_000, 6),
+        (300, 400, 3),
+        (300, 1_000, 6),
+        (300, 2_000, 6),
+        (600, 400, 2),
+        (600, 1_000, 5),
+        (600, 2_000, 6),
+    ] {
+        let memories: Vec<_> = (0..6)
+            .map(|_| {
+                let mut memory = recorded_memory(aether_core::memory::MemoryProvenance {
+                    agent: Some(a.id),
+                    ..Default::default()
+                });
+                memory.text = "x".repeat(length);
+                memory
+            })
+            .collect();
+        let mut c = caps();
+        c.context_window = budget * 40;
+        let mut input = inputs(&a, None, &[], &[], &c);
+        input.memories = &memories;
+        let out = ContextManager::new().assemble(input);
+        let layer = out
+            .snapshot
+            .layers
+            .iter()
+            .find(|layer| layer.kind == LayerKind::RetrievedMemory)
+            .expect("memory layer");
+        assert_eq!(layer.items, retained, "length={length}, budget={budget}");
+        assert!(layer.tokens <= budget);
+        assert_eq!(
+            out.snapshot.memory_ids,
+            memories[..retained as usize]
+                .iter()
+                .map(|memory| memory.id)
+                .collect::<Vec<_>>()
+        );
+    }
+}

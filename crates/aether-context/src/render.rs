@@ -6,6 +6,7 @@ use std::path::Path;
 use aether_core::agent::{Agent, AgentStatusKind, NetworkPolicy, WaitCondition};
 use aether_core::attachment::{AttachmentRef, MAX_IMAGES_PER_MESSAGE, MAX_MESSAGE_IMAGE_BYTES};
 use aether_core::checkpoint::Checkpoint;
+use aether_core::event::Actor;
 use aether_core::id::InboxItemId;
 use aether_core::inbox::{InboxItem, InboxKind};
 use aether_core::memory::MemoryRecord;
@@ -273,10 +274,33 @@ pub fn memory_line(record: &MemoryRecord) -> String {
     }
     // A fact the repository states in a committed file is checkable; saying
     // where it came from is what lets a model check it.
-    if let Some(source) = &record.provenance.source {
-        let _ = write!(line, " [{}]", source.label());
+    match &record.provenance.source {
+        Some(source) => {
+            let _ = write!(line, " [{}]", source.label());
+        }
+        // An absolute date, not an age: the line must not change from one day
+        // to the next, or a resumed engine session is re-sent the same memory.
+        None => {
+            let _ = write!(
+                line,
+                " [{}, {}]",
+                memory_origin(record),
+                record.created_at.format("%Y-%m-%d")
+            );
+        }
     }
     line
+}
+
+/// Who recorded a memory, read only from provenance the runtime set. An
+/// imported operator acted on another machine, so it is not named this one's.
+fn memory_origin(record: &MemoryRecord) -> &'static str {
+    match (&record.provenance.actor, record.provenance.agent) {
+        (Some(Actor::User { .. }), _) => "operator",
+        (Some(Actor::Imported { .. }), _) => "imported",
+        (Some(Actor::Agent { .. }), _) | (None, Some(_)) => "agent",
+        _ => "unknown",
+    }
 }
 
 /// The memory layer, with anything read out of a repository's files kept in
@@ -290,7 +314,8 @@ pub fn memory_layer(own: &[String], from_files: &[String]) -> String {
     let mut out = String::new();
     if !own.is_empty() {
         out.push_str(
-            "Relevant durable memory (retrieved for this turn; cite ids if you rely on one):\n",
+            "Memory (origin, date; may be stale). Current instructions take precedence. \
+             Cite IDs; flag unclear conflicts:\n",
         );
         out.push_str(&own.join("\n"));
     }
