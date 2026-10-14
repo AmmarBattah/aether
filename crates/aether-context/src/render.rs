@@ -1,5 +1,6 @@
 //! Rendering authoritative state into prompt text.
 
+use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -7,12 +8,12 @@ use aether_core::agent::{Agent, AgentStatusKind, NetworkPolicy, WaitCondition};
 use aether_core::attachment::{AttachmentRef, MAX_IMAGES_PER_MESSAGE, MAX_MESSAGE_IMAGE_BYTES};
 use aether_core::checkpoint::Checkpoint;
 use aether_core::event::Actor;
-use aether_core::id::InboxItemId;
+use aether_core::id::{AgentId, InboxItemId};
 use aether_core::inbox::{InboxItem, InboxKind};
 use aether_core::memory::MemoryRecord;
 use aether_core::model::{ContentBlock, Effort, Message, text_of};
 use aether_core::task::{Task, TaskStatus};
-use aether_core::tool::ApprovalDecision;
+use aether_core::tool::{ApprovalDecision, ApprovalRequest};
 
 use crate::ContextInputs;
 
@@ -92,6 +93,24 @@ pub fn runtime_state(inputs: &ContextInputs<'_>) -> String {
 }
 
 fn status_text(inputs: &ContextInputs<'_>, stated_effort: Option<Effort>) -> String {
+    let mut out = status_header(inputs, stated_effort);
+    let links = FleetLinks::new(inputs.children, inputs.child_tasks);
+    push_child_agents(&mut out, inputs.children, &links);
+    push_other_tasks(&mut out, inputs.child_tasks, &links);
+    push_pending_approvals(&mut out, inputs.pending_approvals);
+    if let Some(interrupted) = &inputs.agent.resume_wait {
+        let _ = write!(
+            out,
+            "\nYou were waiting for {} and were woken early (a person or your parent spoke, a delegated task \
+             failed or was cancelled, or a trigger arrived). After this turn you return to that wait unless \
+             you complete the task, fail it, or call wait_for.",
+            describe_wait(interrupted)
+        );
+    }
+    out.trim_end().to_owned()
+}
+
+fn status_header(inputs: &ContextInputs<'_>, stated_effort: Option<Effort>) -> String {
     let agent = inputs.agent;
     let mut out = String::new();
     let _ = write!(out, "Turn {}.", inputs.turn);
@@ -105,80 +124,111 @@ fn status_text(inputs: &ContextInputs<'_>, stated_effort: Option<Effort>) -> Str
         let _ = write!(out, " Turns used {}/{}.", agent.stats.turns, max);
     }
     out.push('\n');
-
     if let aether_core::agent::AgentStatus::Waiting { condition } = &agent.status {
         let _ = writeln!(out, "You were waiting on: {}.", describe_wait(condition));
     }
+    out
+}
 
-    if !inputs.children.is_empty() {
-        out.push_str("\nChild agents:\n");
-        for child in inputs.children {
-            let task = inputs
-                .child_tasks
+/// Child/task ownership resolved once, so a fleet renders in linear time
+/// instead of scanning every task per child and every child per task.
+struct FleetLinks<'a> {
+    /// Every listed child, with the first task in record order it owns.
+    first_task: HashMap<AgentId, Option<&'a Task>>,
+}
+
+impl<'a> FleetLinks<'a> {
+    fn new(children: &[Agent], tasks: &'a [Task]) -> Self {
+        let mut first_task: HashMap<AgentId, Option<&'a Task>> =
+            children.iter().map(|child| (child.id, None)).collect();
+        for task in tasks {
+            if let Some(slot) = task.owner.and_then(|owner| first_task.get_mut(&owner)) {
+                slot.get_or_insert(task);
+            }
+        }
+        debug_assert!(first_task.len() <= children.len());
+        debug_assert!(
+            first_task
                 .iter()
-                .find(|t| t.owner == Some(child.id));
+                .all(|(owner, task)| task.is_none_or(|t| t.owner == Some(*owner))),
+            "every linked task belongs to the child it is listed under"
+        );
+        Self { first_task }
+    }
+
+    fn task_of(&self, child: AgentId) -> Option<&'a Task> {
+        self.first_task.get(&child).copied().flatten()
+    }
+
+    /// Ownerless, or owned by an agent that is not a listed child.
+    fn is_orphan(&self, task: &Task) -> bool {
+        task.owner
+            .is_none_or(|owner| !self.first_task.contains_key(&owner))
+    }
+}
+
+fn push_child_agents(out: &mut String, children: &[Agent], links: &FleetLinks<'_>) {
+    if children.is_empty() {
+        return;
+    }
+    out.push_str("\nChild agents:\n");
+    for child in children {
+        let _ = write!(
+            out,
+            "- {} \"{}\" ({}) {}",
+            child.id,
+            child.name,
+            child.role,
+            child.status.kind()
+        );
+        if let Some(t) = links.task_of(child.id) {
+            debug_assert_eq!(t.owner, Some(child.id));
             let _ = write!(
                 out,
-                "- {} \"{}\" ({}) {}",
-                child.id,
-                child.name,
-                child.role,
-                child.status.kind()
-            );
-            if let Some(t) = task {
-                let _ = write!(
-                    out,
-                    " on task {} [{}]: {}",
-                    t.id,
-                    t.status.kind(),
-                    short(&t.objective, 100)
-                );
-            }
-            out.push('\n');
-        }
-    }
-    let orphan_tasks: Vec<&Task> = inputs
-        .child_tasks
-        .iter()
-        .filter(|t| t.owner.is_none() || !inputs.children.iter().any(|c| Some(c.id) == t.owner))
-        .collect();
-    if !orphan_tasks.is_empty() {
-        out.push_str("\nOther tasks you created:\n");
-        for t in orphan_tasks {
-            let _ = writeln!(
-                out,
-                "- {} [{}]: {}",
+                " on task {} [{}]: {}",
                 t.id,
                 t.status.kind(),
                 short(&t.objective, 100)
             );
-            if let TaskStatus::Completed { result } = &t.status {
-                let _ = writeln!(out, "  result: {}", short(&result.summary, 200));
-            }
         }
+        out.push('\n');
     }
-    if !inputs.pending_approvals.is_empty() {
-        out.push_str("\nPending approvals (the runtime will wake you when resolved):\n");
-        for a in inputs.pending_approvals {
-            let _ = writeln!(
-                out,
-                "- {} for `{}`: {}",
-                a.id,
-                a.tool,
-                short(&a.description, 120)
-            );
-        }
+}
+
+fn push_other_tasks(out: &mut String, tasks: &[Task], links: &FleetLinks<'_>) {
+    let mut orphans = tasks.iter().filter(|t| links.is_orphan(t)).peekable();
+    if orphans.peek().is_none() {
+        return;
     }
-    if let Some(interrupted) = &agent.resume_wait {
-        let _ = write!(
+    out.push_str("\nOther tasks you created:\n");
+    for t in orphans {
+        let _ = writeln!(
             out,
-            "\nYou were waiting for {} and were woken early (a person or your parent spoke, a delegated task \
-             failed or was cancelled, or a trigger arrived). After this turn you return to that wait unless \
-             you complete the task, fail it, or call wait_for.",
-            describe_wait(interrupted)
+            "- {} [{}]: {}",
+            t.id,
+            t.status.kind(),
+            short(&t.objective, 100)
+        );
+        if let TaskStatus::Completed { result } = &t.status {
+            let _ = writeln!(out, "  result: {}", short(&result.summary, 200));
+        }
+    }
+}
+
+fn push_pending_approvals(out: &mut String, approvals: &[ApprovalRequest]) {
+    if approvals.is_empty() {
+        return;
+    }
+    out.push_str("\nPending approvals (the runtime will wake you when resolved):\n");
+    for a in approvals {
+        let _ = writeln!(
+            out,
+            "- {} for `{}`: {}",
+            a.id,
+            a.tool,
+            short(&a.description, 120)
         );
     }
-    out.trim_end().to_owned()
 }
 
 /// Native sessions retain earlier status messages. Summarize the fleet instead
@@ -599,6 +649,9 @@ fn short(text: &str, max: usize) -> String {
         format!("{cut}…")
     }
 }
+
+#[cfg(test)]
+mod status_tests;
 
 #[cfg(test)]
 mod tests {
