@@ -4,7 +4,11 @@ What each release of Aether brings, newest first. Aether follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The section of a
 release is also the text of its GitHub release.
 
-## Unreleased
+## 1.0.5
+
+Claude Code agents can opt into a leaner start that skips the operator's
+skill listing and extra MCP servers, and engine costs now include requests
+that a closing receipt left out.
 
 ### New
 
