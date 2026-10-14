@@ -4,7 +4,11 @@ What each release of Aether brings, newest first. Aether follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The section of a
 release is also the text of its GitHub release.
 
-## Unreleased
+## 1.0.4
+
+Keep live replies visible while children work and when navigating approvals.
+Recalled memories show their origin and precedence, changed requirements
+are kept, and detailed fleet status avoids repeated ownership scans.
 
 ### Fixed
 
@@ -13,8 +17,9 @@ release is also the text of its GitHub release.
   every task to its owner by scanning all children. Ownership is now looked
   up once per turn and the rendered text is unchanged. In an isolated
   benchmark of pure context preparation, without database, engine or model
-  time, 1,000 children with 1,000 tasks took 0.48 ms instead of 1.20 ms;
-  fleets of ten children or fewer took at most 0.7 µs longer.
+  time, the observed median for 1,000 children with 1,000 tasks was 0.48 ms
+  instead of 1.20 ms. For fleets of ten children or fewer, observed median
+  increases were at most 0.7 µs; this is not a worst-case bound.
 - **Approval navigation returns to the requester's latest output.** Opening
   an approval's requester from another agent, or denying an approval, now
   restores its live transcript when an older history window was displayed.
