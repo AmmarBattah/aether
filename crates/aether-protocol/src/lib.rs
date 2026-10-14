@@ -159,6 +159,9 @@ pub mod features {
     pub const ARTIFACT_BYTES: &str = "artifact_bytes";
     /// The daemon accepts `AgentConfig.host_context`.
     pub const HOST_CONTEXT: &str = "host_context";
+    /// The daemon accepts role and repository-role operator memories,
+    /// including explicit repository names on both repository scopes.
+    pub const OPERATOR_MEMORY_ROLES: &str = "operator_memory_roles";
 }
 
 mod handshake;

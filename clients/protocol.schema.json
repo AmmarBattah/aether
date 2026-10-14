@@ -9368,6 +9368,12 @@
         {
           "additionalProperties": false,
           "properties": {
+            "repository": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "root": {
               "type": [
                 "string",
@@ -9381,6 +9387,52 @@
           },
           "required": [
             "scope"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "role": {
+              "type": "string"
+            },
+            "scope": {
+              "const": "role",
+              "type": "string"
+            }
+          },
+          "required": [
+            "scope",
+            "role"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "repository": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "role": {
+              "type": "string"
+            },
+            "root": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "scope": {
+              "const": "repository_role",
+              "type": "string"
+            }
+          },
+          "required": [
+            "scope",
+            "role"
           ],
           "type": "object"
         }

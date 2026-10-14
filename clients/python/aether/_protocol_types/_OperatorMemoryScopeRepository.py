@@ -7,5 +7,6 @@ from .. import protocol as _protocol
 
 
 class OperatorMemoryScopeRepository(TypedDict, total=False):
+    repository: str | None  # optional
     root: str | None  # optional
     scope: Literal["repository"]

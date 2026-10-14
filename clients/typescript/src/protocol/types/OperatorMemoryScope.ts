@@ -19,12 +19,27 @@ export interface OperatorMemoryScopeGlobal {
 }
 
 export interface OperatorMemoryScopeRepository {
+  "repository"?: string | null;
   "root"?: string | null;
   "scope": "repository";
+}
+
+export interface OperatorMemoryScopeRole {
+  "role": string;
+  "scope": "role";
+}
+
+export interface OperatorMemoryScopeRepositoryRole {
+  "repository"?: string | null;
+  "role": string;
+  "root"?: string | null;
+  "scope": "repository_role";
 }
 
 export type OperatorMemoryScope =
     OperatorMemoryScopeAgent |
     OperatorMemoryScopeGlobal |
-    OperatorMemoryScopeRepository
+    OperatorMemoryScopeRepository |
+    OperatorMemoryScopeRole |
+    OperatorMemoryScopeRepositoryRole
 ;

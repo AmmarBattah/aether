@@ -6,6 +6,17 @@ release is also the text of its GitHub release.
 
 ## Unreleased
 
+### New
+
+- **Operators can file memories by role.** The `role` scope reaches agents
+  with that exact role across repositories. The `repository_role` scope
+  reaches one role family in a repository, including dotted subroles such
+  as `reviewer.security` and Archon roles such as `archon-stage:default/review`.
+  Both repository scopes accept `repository` to target an existing agent's
+  explicit repository name, or `root` for the workspace-derived id. Daemons
+  advertise `operator_memory_roles` so clients can check support for the new
+  scopes and the `repository` field.
+
 ### Fixed
 
 - **A parent's terminal history is no longer crowded out by its children's

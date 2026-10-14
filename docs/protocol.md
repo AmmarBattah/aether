@@ -103,6 +103,43 @@ A client must check that the `Welcome` lists `host_context` before sending
 `config.host_context`: an older daemon silently ignores the field and creates
 a full agent.
 
+`operator_memory_roles` means `create_memory` accepts the `role` and
+`repository_role` operator scopes and the `repository` field on both repository
+scopes. Check this feature before sending any of them. An older daemon rejects
+unknown scopes or fields with a decode error; it cannot file the memory under
+a different scope. The protocol version is unchanged.
+
+## Operator memory scopes
+
+`create_memory` is operator-only. Its `spec.scope` describes which agents
+recall the memory; the runtime records the authenticated user as its author.
+The scopes are `{"scope": "global"}`, `{"scope": "agent", "id": "agt_..."}`,
+`{"scope": "repository", "root": "/workspace"}`,
+`{"scope": "role", "role": "reviewer"}` and
+`{"scope": "repository_role", "repository": "aether", "role": "reviewer"}`.
+
+A `role` memory reaches agents with that exact role in any repository.
+For `repository_role`, a memory filed for `reviewer` is recalled by agents with
+role `reviewer` or `reviewer.security`, but not `reviewers`, in that repository.
+Surrounding spaces are trimmed. Roles must be nonempty and at most 256
+characters after trimming; any control character (including a trailing newline)
+is refused. A repository role family requires one to eight dot-separated,
+nonempty segments. Roles such as `archon-stage:default/review` and
+`archon-run:default` are accepted; the stricter directory-name grammar for
+`.aether/roles` does not apply to operator scopes.
+
+Both repository scopes accept either `root` or `repository`, never both.
+`root` targets the id Aether derives for that workspace from its origin remote
+or canonical path. An explicit root must be the daemon's workspace, a live
+agent's workspace, or a directory within one. `repository` targets agents
+created with an explicit `scope.repository` (as Archon does). The name is
+normalized using the same rules as agent creation and must already be carried
+by at least one agent, including terminal or archived agents. For example,
+`{"scope": "repository", "repository": "aether"}` targets that explicit scope
+rather than the workspace's derived id. When neither field is set, the daemon's
+workspace root is used. Unknown scope fields and invalid roles, roots or
+repository names are refused before a memory is written.
+
 ## Narrowing a child's events
 
 `get_events` and `subscribe` take an event query. With `agent`, it matches the

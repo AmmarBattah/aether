@@ -158,6 +158,9 @@ impl Store for CommitsMidPass {
         self.inner.screen_run_expiry(run, before)
     }
 
+    fn any_agent_in_repository(&self, repository: &str) -> Result<bool> {
+        self.inner.any_agent_in_repository(repository)
+    }
     fn agents(&self, filter: &AgentFilter) -> Result<Vec<Agent>> {
         if self.hook == Hook::CancelDescendantRead
             && filter.parent.is_some()

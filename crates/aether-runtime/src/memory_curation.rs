@@ -8,8 +8,8 @@ use std::path::PathBuf;
 use aether_core::event::Actor;
 use aether_core::id::MemoryId;
 use aether_core::memory::{
-    MemoryCandidate, MemoryProvenance, MemoryRecord, MemoryScope, OperatorMemoryScope,
-    OperatorMemorySpec, SeedReport,
+    MAX_ROLE_SEGMENTS, MemoryCandidate, MemoryProvenance, MemoryRecord, MemoryScope,
+    OperatorMemoryScope, OperatorMemorySpec, SeedReport,
 };
 use aether_memory::Admission;
 
@@ -36,6 +36,26 @@ impl Runtime {
                 "only an operator can create operator memories".into(),
             ));
         }
+        let candidate = self.operator_candidate(spec, by.clone())?;
+        let hold = self.hold();
+        if let Some(receipt) = self.replay_receipt(&hold, submission.as_ref())? {
+            return Ok(receipt);
+        }
+        let (admission, commit) = self.memory.evaluate_operator(&hold, candidate, by)?;
+        let record = match admission {
+            Admission::Accepted { record } | Admission::Superseded { record, .. } => record,
+            Admission::Rejected { reason } => {
+                return Err(RuntimeError::Invalid(format!(
+                    "memory not admitted: {reason}"
+                )));
+            }
+        };
+        self.commit_receipt(hold, commit, submission.as_ref(), &record)?;
+        self.memory.index_committed(&record)?;
+        Ok(record)
+    }
+
+    fn operator_candidate(&self, spec: OperatorMemorySpec, by: Actor) -> Result<MemoryCandidate> {
         let importance = spec.importance.unwrap_or(0.5);
         let confidence = spec.confidence.unwrap_or(0.7);
         for (field, value) in [("importance", importance), ("confidence", confidence)] {
@@ -60,20 +80,8 @@ impl Runtime {
                     .into(),
             ));
         }
-        let scope = match spec.scope {
-            OperatorMemoryScope::Global => MemoryScope::Global,
-            OperatorMemoryScope::Agent { id } => {
-                self.store
-                    .agent(id)?
-                    .ok_or_else(|| RuntimeError::NotFound(id.to_string()))?;
-                MemoryScope::Agent { id }
-            }
-            OperatorMemoryScope::Repository { root } => {
-                let (_, id) = self.memory_repository(root)?;
-                MemoryScope::Repository { id }
-            }
-        };
-        let candidate = MemoryCandidate {
+        let scope = self.operator_scope(spec.scope)?;
+        Ok(MemoryCandidate {
             scope,
             kind: spec.kind,
             text: spec.text.trim().to_owned(),
@@ -82,27 +90,71 @@ impl Runtime {
             confidence,
             tags: spec.tags,
             provenance: MemoryProvenance {
-                actor: Some(by.clone()),
+                actor: Some(by),
                 ..Default::default()
             },
             supersedes: spec.supersedes,
-        };
-        let hold = self.hold();
-        if let Some(receipt) = self.replay_receipt(&hold, submission.as_ref())? {
-            return Ok(receipt);
-        }
-        let (admission, commit) = self.memory.evaluate_operator(&hold, candidate, by)?;
-        let record = match admission {
-            Admission::Accepted { record } | Admission::Superseded { record, .. } => record,
-            Admission::Rejected { reason } => {
-                return Err(RuntimeError::Invalid(format!(
-                    "memory not admitted: {reason}"
-                )));
+        })
+    }
+
+    fn operator_scope(&self, scope: OperatorMemoryScope) -> Result<MemoryScope> {
+        Ok(match scope {
+            OperatorMemoryScope::Global => MemoryScope::Global,
+            OperatorMemoryScope::Agent { id } => {
+                self.store
+                    .agent(id)?
+                    .ok_or_else(|| RuntimeError::NotFound(id.to_string()))?;
+                MemoryScope::Agent { id }
             }
+            OperatorMemoryScope::Repository { root, repository } => {
+                let id = self.operator_repository(root, repository)?;
+                MemoryScope::Repository { id }
+            }
+            OperatorMemoryScope::Role { role } => MemoryScope::Role {
+                role: operator_role(&role)?,
+            },
+            OperatorMemoryScope::RepositoryRole {
+                root,
+                repository,
+                role,
+            } => {
+                let id = self.operator_repository(root, repository)?;
+                let role = operator_role(&role)?;
+                if role.split('.').count() > MAX_ROLE_SEGMENTS || role.split('.').any(str::is_empty)
+                {
+                    return Err(RuntimeError::Invalid(format!(
+                        "scope.role must be a role family: at most {MAX_ROLE_SEGMENTS} dot-separated \
+                         nonempty segments"
+                    )));
+                }
+                MemoryScope::RepositoryRole { id, role }
+            }
+        })
+    }
+
+    fn operator_repository(
+        &self,
+        root: Option<PathBuf>,
+        repository: Option<String>,
+    ) -> Result<String> {
+        if root.is_some() && repository.is_some() {
+            return Err(RuntimeError::Invalid(
+                "scope.root and scope.repository are mutually exclusive".into(),
+            ));
+        }
+        let Some(repository) = repository else {
+            return self.memory_repository(root).map(|(_, id)| id);
         };
-        self.commit_receipt(hold, commit, submission.as_ref(), &record)?;
-        self.memory.index_committed(&record)?;
-        Ok(record)
+        let id = aether_core::repository::normalize_id(&repository).ok_or_else(|| {
+            RuntimeError::Invalid("scope.repository is not a valid repository id".into())
+        })?;
+        if !self.store.any_agent_in_repository(&id)? {
+            return Err(RuntimeError::Invalid(
+                "scope.repository names no agent's repository; name a root or a repository an agent works in"
+                    .into(),
+            ));
+        }
+        Ok(id)
     }
 
     /// Curate a memory out. The record stays; it is never retrieved again.
@@ -191,4 +243,22 @@ impl Runtime {
         }
         Ok(root)
     }
+}
+
+fn operator_role(role: &str) -> Result<String> {
+    let trimmed = role.trim();
+    if trimmed.is_empty() {
+        return Err(RuntimeError::Invalid("scope.role is empty".into()));
+    }
+    if role.chars().any(char::is_control) {
+        return Err(RuntimeError::Invalid(
+            "scope.role must be control-free".into(),
+        ));
+    }
+    if trimmed.chars().count() > 256 {
+        return Err(RuntimeError::Invalid(
+            "scope.role must be at most 256 characters after trimming".into(),
+        ));
+    }
+    Ok(trimmed.to_owned())
 }

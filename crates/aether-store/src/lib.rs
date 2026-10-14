@@ -525,6 +525,8 @@ pub trait Store: Send + Sync {
 
     fn agent(&self, id: AgentId) -> Result<Option<Agent>>;
     fn agents(&self, filter: &AgentFilter) -> Result<Vec<Agent>>;
+    /// Whether any agent, including archived and terminal agents, carries this repository scope.
+    fn any_agent_in_repository(&self, repository: &str) -> Result<bool>;
 
     fn task(&self, id: TaskId) -> Result<Option<Task>>;
     fn tasks(&self, filter: &TaskFilter) -> Result<Vec<Task>>;

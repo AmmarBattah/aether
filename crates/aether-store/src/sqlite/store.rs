@@ -266,6 +266,14 @@ impl Store for SqliteStore {
         self.read_one("SELECT body FROM agents WHERE id = ?1", &id.to_string())
     }
 
+    fn any_agent_in_repository(&self, repository: &str) -> Result<bool> {
+        Ok(self.conn.lock().query_row(
+            "SELECT EXISTS(SELECT 1 FROM agents WHERE json_extract(body, '$.scope.repository') = ?1)",
+            [repository],
+            |row| row.get(0),
+        )?)
+    }
+
     fn agents(&self, filter: &AgentFilter) -> Result<Vec<Agent>> {
         let mut sql = String::from("SELECT body FROM agents WHERE 1 = 1");
         let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();

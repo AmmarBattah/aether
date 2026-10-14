@@ -381,6 +381,9 @@ impl Store for CommitLog {
     fn agent(&self, id: AgentId) -> StoreResult<Option<Agent>> {
         self.inner.agent(id)
     }
+    fn any_agent_in_repository(&self, repository: &str) -> StoreResult<bool> {
+        self.inner.any_agent_in_repository(repository)
+    }
     fn agents(&self, filter: &AgentFilter) -> StoreResult<Vec<Agent>> {
         self.inner.agents(filter)
     }

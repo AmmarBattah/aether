@@ -514,3 +514,34 @@ fn before_cursor_uses_the_agent_sequence_index() {
     );
     assert!(!plan.iter().any(|s| s.contains("TEMP B-TREE")), "{plan:?}");
 }
+
+#[test]
+fn repository_membership_matches_serialized_scopes_including_archived_agents() {
+    let store = SqliteStore::open_in_memory().expect("open");
+    assert!(
+        !store
+            .any_agent_in_repository("aether")
+            .expect("empty store")
+    );
+    let mut a = agent();
+    a.scope.repository = Some("aether".into());
+    assert_eq!(
+        serde_json::to_value(&a).unwrap()["scope"]["repository"],
+        "aether"
+    );
+    for (status, archived) in [
+        (AgentStatus::Created, false),
+        (AgentStatus::Completed { summary: None }, false),
+        (AgentStatus::Completed { summary: None }, true),
+    ] {
+        a.status = status;
+        a.archived = archived;
+        store
+            .commit(Commit::new().mutate(Mutation::UpsertAgent(a.clone())))
+            .unwrap();
+        assert!(store.any_agent_in_repository("aether").unwrap());
+        for other in ["aeth", "aether.child", "Aether", "other", "' OR 1=1 --"] {
+            assert!(!store.any_agent_in_repository(other).unwrap(), "{other}");
+        }
+    }
+}

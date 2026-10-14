@@ -127,7 +127,7 @@ fn operator_commands_reject_missing_selection_and_surface_errors_without_stale_n
         scope: commands::RememberScope::Repository,
     });
     assert!(
-        matches!(&repository[..], [Effect::Request { command: Command::CreateMemory { spec , idempotency_key: None, }, .. }] if spec.scope == aether_core::memory::OperatorMemoryScope::Repository { root: Some(root) })
+        matches!(&repository[..], [Effect::Request { command: Command::CreateMemory { spec , idempotency_key: None, }, .. }] if spec.scope == aether_core::memory::OperatorMemoryScope::Repository { root: Some(root), repository: None })
     );
     app.on_reply(
         Then::MemoryCreated { selected: Some(id) },

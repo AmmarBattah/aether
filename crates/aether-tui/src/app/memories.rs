@@ -38,7 +38,10 @@ impl App {
                     self.flash("selected agent has no workspace; use /remember --agent or --global explicitly");
                     return Vec::new();
                 }
-                OperatorMemoryScope::Repository { root }
+                OperatorMemoryScope::Repository {
+                    root,
+                    repository: None,
+                }
             }
         };
         vec![Effect::Request {
