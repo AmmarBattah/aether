@@ -4,23 +4,8 @@ use aether_core::event::Actor;
 use std::path::Path;
 
 impl Runtime {
-    /// The scope a create asked for, with its repository resolved ahead of
-    /// `child_scope`'s narrowing check, so that check applies unchanged.
-    ///
-    /// Memory is scoped by repository, so an agent in a workspace with no
-    /// repository named would remember nothing another agent could use. The
-    /// remote is the stable name across clones; the path is the fallback.
-    /// Normalized before the narrowing check, so a request naming the same
-    /// repository in an unnormalized but equivalent form - the remote URL
-    /// where the parent stored the bare path, a trailing `.git` - narrows
-    /// rather than "widening" to a string that happens to differ. An id that
-    /// will not normalize is refused with what was asked for, never silently
-    /// dropped: this is an explicit choice of what memory scope the agent's
-    /// writes and reads land in, not a hint to fall back from.
-    ///
-    /// `repository_root` names a checkout instead, and gets the id an agent
-    /// working there would derive. With no scope asked for, the root lands
-    /// in the scope the agent would otherwise have been given.
+    /// The requested scope, its repository resolved before `child_scope` narrows it: a named
+    /// id is normalized or refused (never dropped); a checkout gets the id its agents derive.
     pub(super) fn requested_scope(
         &self,
         scope: Option<Scope>,
