@@ -8,6 +8,15 @@ release is also the text of its GitHub release.
 
 ### Fixed
 
+- **A changed requirement is no longer mistaken for a duplicate memory.**
+  Admission treated notes that shared most of their words as one note, and
+  skipped negations, short words, case and punctuation, so "do not run cargo
+  fmt" matched "run cargo fmt", and "under 40 lines" matched "under 60 lines".
+  The new note was rejected as redundant, or silently replaced the old one.
+  Only a note with the same text, apart from surrounding whitespace, is now a
+  duplicate; any other note is admitted beside the original, which stays
+  current, and naming the original in `supersedes` still replaces it. A note
+  that differs only in case or punctuation is now kept as a second memory.
 - **Recalled memory shows its origin and date.** Ordinary memory lines name
   the recorder category and creation date, and the prompt says current
   instructions take precedence over recalled context. Imported and unknown

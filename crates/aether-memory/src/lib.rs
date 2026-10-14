@@ -41,7 +41,8 @@ pub struct AdmissionPolicy {
     pub min_confidence: f32,
     pub min_chars: usize,
     pub max_chars: usize,
-    /// Token-set similarity above which a candidate duplicates an existing memory.
+    /// Token-set similarity a duplicate must also reach. Similarity alone never
+    /// makes a duplicate: only the same text, trimmed, can be one.
     pub duplicate_threshold: f32,
     /// Phrases that mark a fact as transient rather than durable.
     pub transient_markers: Vec<&'static str>,
@@ -208,7 +209,7 @@ impl MemoryService {
             return Ok((Admission::Rejected { reason }, commit));
         }
 
-        // Explicit supersession wins; otherwise look for a near-duplicate.
+        // Explicit supersession wins; otherwise look for a duplicate.
         let old = match candidate.supersedes {
             Some(id) => Some(self.store.memory(id)?.ok_or(MemoryError::NotFound(id))?),
             None => self.find_duplicate(&candidate)?,
@@ -407,6 +408,8 @@ impl MemoryService {
         None
     }
 
+    /// A changed word, number, path, case or punctuation mark may be a changed
+    /// requirement, so only the same text, trimmed, can duplicate a memory.
     fn find_duplicate(&self, c: &MemoryCandidate) -> Result<Option<MemoryRecord>> {
         let existing = self.store.memories(&MemoryQuery {
             scope: Some(c.scope.clone()),
@@ -415,9 +418,11 @@ impl MemoryService {
             limit: 10,
             ..Default::default()
         })?;
+        let text = c.text.trim();
         let candidate_tokens = tokens(&c.text);
         let best = existing
             .into_iter()
+            .filter(|m| m.text.trim() == text)
             .map(|m| {
                 let sim = jaccard(&candidate_tokens, &tokens(&m.text));
                 (sim, m)
@@ -425,6 +430,8 @@ impl MemoryService {
             .filter(|(sim, _)| *sim >= self.policy.duplicate_threshold)
             .max_by(|a, b| a.0.total_cmp(&b.0))
             .map(|(_, m)| m);
+        debug_assert!(best.as_ref().is_none_or(|m| m.scope == c.scope));
+        debug_assert!(best.as_ref().is_none_or(MemoryRecord::is_current));
         Ok(best)
     }
 
@@ -570,3 +577,6 @@ mod curation_tests;
 
 #[cfg(test)]
 mod embedding_tests;
+
+#[cfg(test)]
+mod admission_tests;
