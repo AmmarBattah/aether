@@ -187,30 +187,8 @@ impl Runtime {
             self.models.resolve(link)?;
         }
         self.check_billing_class(&model, &fallbacks)?;
-        // Memory is scoped by repository, so an agent in a workspace with no
-        // repository named would remember nothing another agent could use.
-        // The remote is the stable name across clones; the path is the
-        // fallback. Normalized before `child_scope`'s narrowing check below,
-        // so a request naming the same repository in an unnormalized but
-        // equivalent form - the remote URL where the parent stored the bare
-        // path, a trailing `.git` - narrows rather than "widening" to a
-        // string that happens to differ. An id that will not normalize is
-        // refused with what was asked for, never silently dropped: this is
-        // an explicit choice of what memory scope the agent's writes and
-        // reads land in, not a hint to fall back from.
-        let mut requested = spec.scope;
-        if let Some(s) = &mut requested
-            && let Some(named) = s.repository.take()
-        {
-            s.repository = Some(aether_core::repository::normalize_id(&named).ok_or_else(
-                || {
-                    RuntimeError::Invalid(format!(
-                        "repository `{named}` cannot be stored as a memory scope; expected a plain \
-                     name, an absolute path, or a URL/SSH remote without embedded credentials"
-                    ))
-                },
-            )?);
-        }
+        let requested =
+            self.requested_scope(spec.scope, spec.repository_root.as_deref(), parent.as_ref())?;
         let mut scope =
             self.child_scope(requested, parent.as_ref(), preflight.isolated_workspace)?;
         if checked.is_some_and(|(_, network)| network != scope.network) {

@@ -234,6 +234,8 @@ pub(crate) async fn apply_action(
                 // Delegation always names its model; do not inherit the parent's chain.
                 fallbacks: Vec::new(),
                 scope: child_scope,
+                // A delegated child inherits its parent's repository.
+                repository_root: None,
                 parent: Some(ctx.agent.id),
                 config: Some(config),
                 // Inherited from the parent by the runtime; a delegating

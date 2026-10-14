@@ -213,6 +213,8 @@ mod recovery_limits;
 mod recovery_support;
 #[path = "kernel/repository_memory.rs"]
 mod repository_memory;
+#[path = "kernel/repository_root.rs"]
+mod repository_root;
 #[path = "kernel/restart_limits.rs"]
 mod restart_limits;
 #[path = "kernel/restart_scope.rs"]

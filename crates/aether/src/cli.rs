@@ -272,6 +272,8 @@ pub struct RunOptions {
     pub backend: String,
     /// Override the daemon's network default for this root.
     pub network: Option<bool>,
+    /// A checkout whose repository id the daemon derives for this agent.
+    pub repository_root: Option<PathBuf>,
     /// Print the outcome as one object rather than streaming the reply.
     pub json: bool,
 }

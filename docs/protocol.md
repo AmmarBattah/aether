@@ -115,6 +115,39 @@ sending the field: an older daemon ignores it and returns every memory the
 rest of the query matches, which would read as all of them having been filed
 by the operator. The Rust client refuses such a query itself.
 
+`repository_root` means `create_agent` accepts `repository_root` (see
+[naming a checkout](#naming-a-checkout)). A client must check it before
+sending the field: an older daemon ignores it and files the agent's memory
+under its workspace's repository instead. The Rust client refuses such a
+create itself.
+
+## Naming a checkout
+
+An agent's memory is scoped by `scope.repository`. Left unset, the daemon
+derives it from the agent's workspace: the normalized `origin` remote, else
+the canonical path. A client whose agents work in worktrees or mirrors can
+name the checkout they belong to instead, and get the id an agent working in
+that checkout would get:
+
+```json
+{"cmd": "create_agent", "role": "worker", "objective": "...",
+  "scope": {"workspace_root": "/src/worktrees/widget/item-7"},
+  "repository_root": "/src/widget"}
+```
+
+`repository_root` sits beside `scope`, not inside it. It is input only: the
+derived id is stored as `scope.repository` and the path itself is not kept.
+It must be an absolute path to an existing directory, and cannot be sent with
+`scope.repository`. The id then goes through the usual narrowing check, so a
+child naming a different repository than its parent is refused, and a child
+created without one inherits its parent's. The field is part of the
+idempotency fingerprint: a key reused with a different `repository_root` is
+refused. A paired device cannot send it, as it cannot send `scope.repository`,
+and agents delegating with the `delegate` tool cannot set it. The id is
+derived from the path given, so a subdirectory of a checkout with no `origin`
+names a different scope than the checkout itself. Check the
+`repository_root` feature first.
+
 ## Operator memory scopes
 
 `create_memory` is operator-only. Its `spec.scope` describes which agents

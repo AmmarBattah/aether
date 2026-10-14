@@ -451,6 +451,7 @@ fn command_for(name: &str, arguments: Value) -> Result<Command, String> {
                 model: chain.as_ref().map(|c| c.primary.clone()),
                 fallbacks: chain.map(|c| c.fallbacks).unwrap_or_default(),
                 scope: None,
+                repository_root: None,
                 parent: a.parent.as_deref().map(id).transpose()?,
                 config: a
                     .effort

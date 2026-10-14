@@ -188,6 +188,9 @@ async fn cli_with_socket(
                 }
                 Command::Unsubscribe { .. } => Ok(Reply::Ok),
                 Command::CreateAgent(spec) => {
+                    if let Some(root) = &spec.repository_root {
+                        assert!(root.is_absolute(), "{}", root.display());
+                    }
                     let mut created = agent();
                     if spec.objective.is_none() {
                         assert_eq!(spec.role, "assistant");
@@ -1035,6 +1038,35 @@ async fn streaming_tool_notice_starts_on_a_new_line() {
     // stdout must terminate the partial text before stderr prints a tool notice.
     assert_eq!(stdout(&out), "Preamble\nReply\n");
     assert!(stderr(&out).contains("▸ bash"));
+}
+
+/// A daemon that would ignore the checkout is refused before the agent is
+/// created under the wrong repository.
+#[tokio::test]
+async fn run_names_a_checkout_only_to_a_daemon_that_derives_its_repository() {
+    let checkout = tempfile::tempdir().unwrap();
+    let args = [
+        "run",
+        "hello",
+        "--model",
+        "mock/m1",
+        "--network=false",
+        "--repository-root",
+        checkout.path().to_str().unwrap(),
+    ];
+    let old = cli(&args, Stub::default()).await;
+    assert_eq!(old.status.code(), Some(1));
+    assert!(
+        stderr(&old).contains("cannot derive a repository"),
+        "{}",
+        stderr(&old)
+    );
+    let deriving = Stub {
+        features: vec![aether_protocol::features::REPOSITORY_ROOT.into()],
+        ..Default::default()
+    };
+    let new = cli(&args, deriving).await;
+    assert!(new.status.success(), "{}", stderr(&new));
 }
 
 #[tokio::test]

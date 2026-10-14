@@ -169,6 +169,10 @@ pub(crate) enum Cmd {
         /// Override the configured network default; --network=false denies access.
         #[arg(long, num_args = 0..=1, default_missing_value = "true", require_equals = true)]
         network: Option<bool>,
+        /// A checkout whose repository names the agent's memory, when it
+        /// works somewhere else, such as a worktree. Local daemons only.
+        #[arg(long)]
+        repository_root: Option<PathBuf>,
         /// Print the outcome as one object on stdout instead of streaming
         /// the reply; progress stays on stderr either way.
         #[arg(long)]

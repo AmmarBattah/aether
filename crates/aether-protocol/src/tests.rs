@@ -114,6 +114,37 @@ fn memory_recorder_filter_is_optional_and_roundtrips() {
     assert!(serde_json::from_value::<MemoryQuerySpec>(unknown).is_err());
 }
 
+#[test]
+fn create_agent_repository_root_is_optional_and_roundtrips() {
+    let legacy: Command = serde_json::from_value(serde_json::json!(
+        {"cmd": "create_agent", "role": "worker"}
+    ))
+    .unwrap();
+    let Command::CreateAgent(legacy) = legacy else {
+        panic!("decoded as create_agent");
+    };
+    assert_eq!(legacy.repository_root, None);
+    assert!(
+        serde_json::to_value(&legacy)
+            .unwrap()
+            .get("repository_root")
+            .is_none()
+    );
+    let wire = serde_json::json!(
+        {"cmd": "create_agent", "role": "worker", "repository_root": "/src/widget", "start": true}
+    );
+    let command: Command = serde_json::from_value(wire.clone()).unwrap();
+    let Command::CreateAgent(create) = &command else {
+        panic!("decoded as create_agent");
+    };
+    assert_eq!(
+        create.repository_root.as_deref(),
+        Some(std::path::Path::new("/src/widget"))
+    );
+    assert!(create.scope.is_none(), "the root is not part of the scope");
+    assert_eq!(serde_json::to_value(&command).unwrap(), wire);
+}
+
 /// The commands a client can key, each with a key set.
 #[test]
 fn client_frame_flattens_command() {

@@ -165,6 +165,19 @@ impl Runtime {
         link.provider.auth.none && free
     }
 
+    /// What a root agent that asked for no scope works in.
+    pub(super) fn default_root_scope(&self) -> Scope {
+        Scope {
+            network: self.config.network_default,
+            workspace_root: self
+                .config
+                .workspace_root
+                .clone()
+                .or_else(|| std::env::current_dir().ok()),
+            ..Default::default()
+        }
+    }
+
     /// The scope a new agent gets. One exit, so no arm can adopt a scope
     /// without the narrowing check: an adopted parent scope goes through it
     /// exactly as an explicit one does. A root agent has nothing above it to
@@ -176,15 +189,7 @@ impl Runtime {
         isolated_workspace: Option<&std::path::Path>,
     ) -> Result<Scope> {
         let Some(parent) = parent else {
-            return Ok(requested.unwrap_or_else(|| Scope {
-                network: self.config.network_default,
-                workspace_root: self
-                    .config
-                    .workspace_root
-                    .clone()
-                    .or_else(|| std::env::current_dir().ok()),
-                ..Default::default()
-            }));
+            return Ok(requested.unwrap_or_else(|| self.default_root_scope()));
         };
         let scope = requested.unwrap_or_else(|| parent.scope.clone());
         let checked = if let Some(workspace) = isolated_workspace {

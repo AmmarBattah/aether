@@ -4233,6 +4233,13 @@
             }
           ]
         },
+        "repository_root": {
+          "description": "An absolute path to a checkout whose repository id the daemon derives\nand stores as `scope.repository`, exactly as for an agent working\nthere. Input only; exclusive with `scope.repository`. A daemon without\n`features::REPOSITORY_ROOT` ignores it, so check that first.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "role": {
           "type": "string"
         },

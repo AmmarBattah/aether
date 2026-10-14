@@ -22,6 +22,12 @@ pub struct CreateAgent {
     pub fallbacks: Vec<ModelRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope: Option<Scope>,
+    /// An absolute path to a checkout whose repository id the daemon derives
+    /// and stores as `scope.repository`, exactly as for an agent working
+    /// there. Input only; exclusive with `scope.repository`. A daemon without
+    /// `features::REPOSITORY_ROOT` ignores it, so check that first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository_root: Option<std::path::PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<AgentId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -57,6 +63,7 @@ impl Default for CreateAgent {
             model: None,
             fallbacks: Vec::new(),
             scope: None,
+            repository_root: None,
             parent: None,
             config: None,
             approval: None,

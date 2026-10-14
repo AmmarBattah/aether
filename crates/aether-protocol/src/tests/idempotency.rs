@@ -196,3 +196,27 @@ fn an_unkeyed_command_has_no_fingerprint_view() {
         .is_none()
     );
 }
+
+/// A create without a checkout keeps the digest it had before the field
+/// existed, and one key cannot name two checkouts.
+#[test]
+fn a_create_fingerprints_its_repository_root_only_when_set() {
+    let view = |root: Option<&str>| {
+        Command::CreateAgent(CreateAgent {
+            role: "worker".into(),
+            repository_root: root.map(Into::into),
+            idempotency_key: Some("k-1".into()),
+            ..Default::default()
+        })
+        .keyed_request()
+        .expect("keyed")
+        .expect("view")
+        .fields
+    };
+    let plain = view(None);
+    assert!(plain.get("repository_root").is_none());
+    let named = view(Some("/src/widget"));
+    assert_eq!(named["repository_root"], "/src/widget");
+    assert_ne!(plain, named);
+    assert_ne!(named, view(Some("/src/gadget")));
+}

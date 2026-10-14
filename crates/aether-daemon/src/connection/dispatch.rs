@@ -145,6 +145,7 @@ pub(super) async fn dispatch_authorized(
                 model: req.model,
                 fallbacks: req.fallbacks,
                 scope: req.scope,
+                repository_root: req.repository_root,
                 parent: req.parent,
                 config: req.config,
                 approval: req.approval,

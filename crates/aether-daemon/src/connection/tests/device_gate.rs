@@ -317,6 +317,7 @@ async fn remote_field_escalations_are_refused_before_mutation() {
         serde_json::json!({"cmd":"create_agent", "role":"worker", "scope":{"network":"allowed"}}),
         serde_json::json!({"cmd":"create_agent", "role":"worker", "scope":{"allowed_paths":["/"]}}),
         serde_json::json!({"cmd":"create_agent", "role":"worker", "scope":{"repository":"another-repo"}}),
+        serde_json::json!({"cmd":"create_agent", "role":"worker", "repository_root":"/"}),
         serde_json::json!({"cmd":"update_agent", "id":id, "patch":{"backend":{"backend":"host"}}}),
         serde_json::json!({"cmd":"update_agent", "id":id, "patch":{"tools":{"mode":"all"}}}),
         serde_json::json!({"cmd":"update_agent", "id":id, "patch":{"network":"allowed"}}),

@@ -203,6 +203,10 @@ pub(crate) fn guard(
         return Ok(());
     }
     match command {
+        // Naming a checkout names a repository, which a device cannot do.
+        Command::CreateAgent(spec) if spec.repository_root.is_some() => Err(ErrorReply::forbidden(
+            "remote creation must derive its repository identity from the workspace",
+        )),
         Command::CreateAgent(spec) => ceilings::creation(
             rt,
             spec.scope.as_ref(),

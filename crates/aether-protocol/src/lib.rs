@@ -165,6 +165,9 @@ pub mod features {
     /// The daemon applies `MemoryQuerySpec.recorded_by`. A daemon without it
     /// ignores the field and returns every memory, so check this first.
     pub const MEMORY_RECORDED_BY: &str = "memory_recorded_by";
+    /// The daemon derives `scope.repository` from `CreateAgent.repository_root`.
+    /// A daemon without it ignores the field, so check this first.
+    pub const REPOSITORY_ROOT: &str = "repository_root";
 }
 
 mod handshake;

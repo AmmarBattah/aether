@@ -23,6 +23,14 @@ release is also the text of its GitHub release.
   same. Daemons advertise `memory_recorded_by`; an older daemon would ignore
   the field and list everything, so clients check for it first and the CLI
   refuses to ask one.
+- **A client can name the checkout an agent's memory belongs to.**
+  `create_agent` takes `repository_root`, an absolute path the daemon derives
+  the repository id from, exactly as for an agent working there, so agents in
+  worktrees share memory with sessions in the checkout itself. It cannot be
+  combined with `scope.repository`, and children inherit the result.
+  `aether run --repository-root` does the same. Daemons advertise
+  `repository_root`; an older daemon would ignore the field, so clients check
+  for it first and the Rust client refuses to send it to one.
 
 ### Fixed
 

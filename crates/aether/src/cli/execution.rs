@@ -24,11 +24,17 @@ pub async fn run(
         yolo,
         backend,
         network,
+        repository_root,
         json,
     } = options;
     if objective.trim().is_empty() {
         bail!("give an objective, e.g. `{command} run \"add a README\"`");
     }
+    anyhow::ensure!(
+        !socket.is_remote() || repository_root.is_none(),
+        "--repository-root is local only; a remote run's repository comes from its --workspace"
+    );
+    let repository_root = repository_root.map(std::path::absolute).transpose()?;
     let _guard = crate::logging::init("aether.log", false)?;
     // A broken ui.toml must not stop `run`: say so and fall back to the
     // daemon's own defaults, same as the TUI (`cli::tui` above).
@@ -83,6 +89,7 @@ pub async fn run(
             model: chain.as_ref().map(|c| c.primary.clone()),
             fallbacks: chain.map(|c| c.fallbacks).unwrap_or_default(),
             scope: Some(scope),
+            repository_root,
             config: effort.map(|effort| AgentConfig {
                 effort: Some(effort),
                 ..Default::default()

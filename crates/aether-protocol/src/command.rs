@@ -507,6 +507,7 @@ impl Command {
                 model,
                 fallbacks,
                 scope,
+                repository_root,
                 parent,
                 config,
                 approval,
@@ -523,6 +524,7 @@ impl Command {
                     model,
                     fallbacks,
                     scope,
+                    repository_root,
                     parent,
                     config,
                     approval,
@@ -769,6 +771,9 @@ struct CreateAgentFingerprint<'a> {
     model: &'a Option<ModelRef>,
     fallbacks: &'a [ModelRef],
     scope: &'a Option<Scope>,
+    // Absent without a checkout, so an earlier create keeps its old digest.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    repository_root: &'a Option<std::path::PathBuf>,
     parent: &'a Option<AgentId>,
     config: &'a Option<AgentConfig>,
     approval: &'a Option<ApprovalPolicy>,

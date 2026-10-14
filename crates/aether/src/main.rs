@@ -226,6 +226,7 @@ fn execute(args: Args, socket: PathBuf) -> anyhow::Result<i32> {
                 no_yolo,
                 backend,
                 network,
+                repository_root,
                 json,
             } => {
                 return cli::run(
@@ -241,6 +242,7 @@ fn execute(args: Args, socket: PathBuf) -> anyhow::Result<i32> {
                         yolo: yolo_flag(yolo, no_yolo),
                         backend,
                         network,
+                        repository_root,
                         json,
                     },
                 )

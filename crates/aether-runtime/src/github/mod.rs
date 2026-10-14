@@ -452,6 +452,7 @@ impl Runtime {
                 model: template.model.clone(),
                 fallbacks: template.fallbacks.clone(),
                 scope: template.scope.clone(),
+                repository_root: None,
                 parent: None,
                 config: template.config.clone(),
                 approval: template.approval.clone(),

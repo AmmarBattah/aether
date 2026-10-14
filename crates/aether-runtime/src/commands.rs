@@ -40,6 +40,9 @@ pub struct CreateAgentSpec {
     pub model: Option<ModelRef>,
     pub fallbacks: Vec<ModelRef>,
     pub scope: Option<Scope>,
+    /// A checkout whose derived repository id becomes `scope.repository`;
+    /// exclusive with naming `scope.repository` outright. Never stored.
+    pub repository_root: Option<std::path::PathBuf>,
     pub parent: Option<AgentId>,
     pub config: Option<AgentConfig>,
     /// Approval policy asked for outright. `None` inherits the parent's, or

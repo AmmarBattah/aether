@@ -25,6 +25,7 @@ pub(super) fn spawn_request(template: &SpawnSpec, objective: String) -> CreateAg
         model: template.model.clone(),
         fallbacks: template.fallbacks.clone(),
         scope: template.scope.clone(),
+        repository_root: None,
         parent: None,
         config: template.config.clone(),
         approval: template.approval.clone(),
