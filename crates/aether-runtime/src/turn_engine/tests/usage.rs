@@ -745,3 +745,256 @@ fn native_request_pricing_reprices_earlier_fragments_when_the_prompt_crosses_the
     assert!((total.cost_usd - 0.35).abs() < 1e-12);
     assert_eq!(total.total_tokens(), 122_000);
 }
+
+fn closing_test_rate() -> ModelCost {
+    ModelCost {
+        input_per_mtok: 1_000_000.0,
+        output_per_mtok: 2_000_000.0,
+        cache_read_per_mtok: 3_000_000.0,
+        cache_write_per_mtok: 4_000_000.0,
+        above_threshold: None,
+    }
+}
+
+fn closing_test_request() -> Usage {
+    Usage {
+        input_tokens: 2,
+        output_tokens: 4,
+        cache_read_tokens: 8,
+        cache_write_tokens: 16,
+        ..Default::default()
+    }
+}
+
+fn stream_closing_test_requests(
+    runtime: &Arc<Runtime>,
+    ctx: &mut TurnCtx,
+    pricing: TurnPricing,
+) -> StreamState {
+    use aether_engine::{RequestUsage, UsageRequestId};
+    let snapshot = bare_snapshot(ctx.agent.id);
+    let mut state = StreamState::new(pricing, configured(runtime, "claude-code/haiku"));
+    for id in ["first", "omitted"] {
+        handle_event(
+            runtime,
+            ctx,
+            &snapshot,
+            EngineEvent::UsageRequest {
+                request: RequestUsage {
+                    id: UsageRequestId::Engine(id.into()),
+                    previous: Usage::default(),
+                    total: closing_test_request(),
+                },
+            },
+            &mut state,
+        )
+        .unwrap();
+    }
+    assert!(state.usage_before.is_some());
+    assert_eq!(state.stream_usage.total_tokens(), 60);
+    state
+}
+
+async fn settle_test_receipt(
+    runtime: &Arc<Runtime>,
+    pricing: TurnPricing,
+    closing: Usage,
+    cost: Option<f64>,
+) -> (Usage, Vec<String>) {
+    let mut ctx = started_agent_ctx(runtime).await;
+    let before = Usage {
+        input_tokens: 7,
+        cost_usd: 5.0,
+        ..Default::default()
+    };
+    ctx.agent.stats.usage = before;
+    let state = stream_closing_test_requests(runtime, &mut ctx, pricing);
+    let run = DriveResult {
+        outcome: EngineOutcome {
+            usage: closing,
+            cost_usd: cost,
+            ..Default::default()
+        },
+        activity_seen: true,
+        park: None,
+        priced: state.priced,
+        usage_seen: state.usage_seen,
+        invoked: false,
+        ran_tools: false,
+        usage_before: state.usage_before,
+        stream_usage: state.stream_usage,
+        request_usage_seen: state.request_usage_seen,
+        budget_stop: None,
+        pricing: state.pricing,
+        cleaned_up: true,
+    };
+    super::super::execution::settle_usage(runtime, &mut ctx, &run).unwrap();
+    let stored = runtime.store.agent(ctx.agent.id).unwrap().unwrap();
+    assert_eq!(stored.stats.usage, ctx.agent.stats.usage);
+    let mut expected = before;
+    expected += ctx.turn_usage;
+    assert_eq!(ctx.agent.stats.usage, expected);
+    let notes = runtime
+        .store
+        .events(0, 1000, &EventFilter::own_events(ctx.agent.id))
+        .unwrap()
+        .into_iter()
+        .filter_map(|event| match event.kind {
+            EventKind::Custom { name, payload } if name == PROTOCOL_NOTE_EVENT => {
+                Some(payload["note"].as_str().unwrap().to_owned())
+            }
+            _ => None,
+        })
+        .collect();
+    (ctx.turn_usage, notes)
+}
+
+#[tokio::test]
+async fn closing_receipt_shortfall_adds_base_price_to_provider_cost() {
+    use aether_core::model::CostBasis;
+    let (runtime, _dir) = test_runtime(|_| {}).await;
+    let pricing = TurnPricing {
+        billed: Some(closing_test_rate()),
+        estimate: None,
+    };
+    let (usage, notes) =
+        settle_test_receipt(&runtime, pricing, closing_test_request(), Some(10.0)).await;
+    assert_eq!(usage.cost_usd, 108.0);
+    assert_eq!(usage.cost_basis, CostBasis::Mixed);
+    assert!(usage.cost_complete);
+    assert_eq!(usage.estimated_cost_usd, None);
+    assert_eq!(usage.total_tokens(), 60);
+    assert_eq!(notes.len(), 1);
+    assert!(notes[0].contains("the missing part is priced from the stream"));
+    runtime.shutdown().await;
+}
+
+#[tokio::test]
+async fn closing_receipt_prices_only_fields_below_the_stream() {
+    use aether_core::model::CostBasis;
+    let (runtime, _dir) = test_runtime(|_| {}).await;
+    let pricing = TurnPricing {
+        billed: Some(closing_test_rate()),
+        estimate: None,
+    };
+    let closing = Usage {
+        input_tokens: 6,
+        output_tokens: 8,
+        cache_read_tokens: 8,
+        cache_write_tokens: 32,
+        ..Default::default()
+    };
+    let (usage, notes) = settle_test_receipt(&runtime, pricing, closing, Some(10.0)).await;
+    assert_eq!(usage.input_tokens, 6);
+    assert_eq!(usage.cache_read_tokens, 16);
+    assert_eq!(usage.total_tokens(), 62);
+    assert_eq!(usage.cost_usd, 34.0);
+    assert_eq!(usage.cost_basis, CostBasis::Mixed);
+    assert!(usage.cost_complete);
+    assert_eq!(usage.estimated_cost_usd, None);
+    assert_eq!(notes.len(), 1);
+    assert!(notes[0].contains("the missing part is priced from the stream"));
+    runtime.shutdown().await;
+}
+
+#[tokio::test]
+async fn closing_receipt_shortfall_estimates_only_the_unbilled_tokens() {
+    use aether_core::model::CostBasis;
+    let (runtime, _dir) = test_runtime(|_| {}).await;
+    let pricing = TurnPricing {
+        billed: None,
+        estimate: Some(closing_test_rate()),
+    };
+    let (usage, notes) =
+        settle_test_receipt(&runtime, pricing, closing_test_request(), Some(10.0)).await;
+    assert_eq!(usage.cost_usd, 10.0);
+    assert!(!usage.cost_complete);
+    assert_eq!(usage.cost_basis, CostBasis::Mixed);
+    assert_eq!(usage.estimated_cost_usd, Some(98.0));
+    assert_eq!(usage.api_equivalent_usd(), Some(108.0));
+    assert_eq!(notes.len(), 1);
+    assert!(notes[0].contains("the missing part is left out of the billed cost"));
+    runtime.shutdown().await;
+}
+
+#[tokio::test]
+async fn closing_receipt_at_or_above_the_stream_keeps_provider_cost() {
+    use aether_core::model::CostBasis;
+    let (runtime, _dir) = test_runtime(|_| {}).await;
+    let pricing = TurnPricing {
+        billed: Some(closing_test_rate()),
+        estimate: None,
+    };
+    let mut closing = closing_test_request();
+    closing += closing_test_request();
+    for extra in [0, 1] {
+        closing.output_tokens += extra;
+        let (usage, notes) = settle_test_receipt(&runtime, pricing, closing, Some(10.0)).await;
+        assert_eq!(usage.cost_usd, 10.0);
+        assert_eq!(usage.cost_basis, CostBasis::ProviderReported);
+        assert!(usage.cost_complete);
+        assert_eq!(usage.estimated_cost_usd, None);
+        assert_eq!(usage.total_tokens(), closing.total_tokens());
+        assert!(notes.is_empty());
+    }
+    runtime.shutdown().await;
+}
+
+#[tokio::test]
+async fn closing_receipt_without_cost_keeps_stream_pricing_and_estimates() {
+    use aether_core::model::CostBasis;
+    let (runtime, _dir) = test_runtime(|_| {}).await;
+    for billed in [true, false] {
+        let pricing = TurnPricing {
+            billed: billed.then_some(closing_test_rate()),
+            estimate: (!billed).then_some(closing_test_rate()),
+        };
+        let (usage, notes) =
+            settle_test_receipt(&runtime, pricing, closing_test_request(), None).await;
+        assert_eq!(usage.cost_usd, if billed { 196.0 } else { 0.0 });
+        assert_eq!(usage.cost_complete, billed);
+        assert_eq!(usage.cost_basis, CostBasis::ListPrice);
+        assert_eq!(usage.estimated_cost_usd, (!billed).then_some(196.0));
+        assert_eq!(usage.total_tokens(), 60);
+        assert_eq!(notes.len(), 1);
+    }
+    runtime.shutdown().await;
+}
+
+#[tokio::test]
+async fn closing_receipt_shortfall_without_rates_is_an_incomplete_floor() {
+    use aether_core::model::CostBasis;
+    let (runtime, _dir) = test_runtime(|_| {}).await;
+    let (usage, notes) = settle_test_receipt(
+        &runtime,
+        TurnPricing::default(),
+        closing_test_request(),
+        Some(10.0),
+    )
+    .await;
+    assert_eq!(usage.cost_usd, 10.0);
+    assert!(!usage.cost_complete);
+    assert_eq!(usage.cost_basis, CostBasis::ProviderReported);
+    assert_eq!(usage.estimated_cost_usd, None);
+    assert_eq!(usage.total_tokens(), 60);
+    assert_eq!(notes.len(), 1);
+    assert!(notes[0].contains("the missing part is left out of the billed cost"));
+    runtime.shutdown().await;
+}
+
+#[tokio::test]
+async fn closing_receipt_with_cost_but_no_tokens_keeps_provider_cost() {
+    use aether_core::model::CostBasis;
+    let (runtime, _dir) = test_runtime(|_| {}).await;
+    let pricing = TurnPricing {
+        billed: Some(closing_test_rate()),
+        estimate: None,
+    };
+    let (usage, notes) = settle_test_receipt(&runtime, pricing, Usage::default(), Some(10.0)).await;
+    assert_eq!(usage.cost_usd, 10.0);
+    assert_eq!(usage.cost_basis, CostBasis::ProviderReported);
+    assert!(usage.cost_complete);
+    assert_eq!(usage.total_tokens(), 60);
+    assert!(notes.is_empty());
+    runtime.shutdown().await;
+}

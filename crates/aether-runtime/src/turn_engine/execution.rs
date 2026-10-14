@@ -611,56 +611,22 @@ pub(crate) async fn execute(
 
 /// Fold one engine run's closing totals into the agent's usage and commit it.
 /// Each run reconciles only its own provisional, streamed accounting.
-fn settle_usage(runtime: &Arc<Runtime>, ctx: &mut TurnCtx, run: &DriveResult) -> Result<()> {
+pub(super) fn settle_usage(
+    runtime: &Arc<Runtime>,
+    ctx: &mut TurnCtx,
+    run: &DriveResult,
+) -> Result<()> {
     ctx.agent.stats.turns = ctx.agent.stats.turns.max(ctx.turn);
     ctx.agent.stats.last_turn_at = Some(now());
     let mut reconciled = None;
     if let Some((before, turn_before)) = run.usage_before {
-        // The completed CLI run knows cache lifetimes and other billing
-        // details that the model registry cannot price from token counts.
-        let mut final_usage = if run.outcome.usage.total_tokens() > 0 {
-            run.outcome.usage
-        } else {
-            run.stream_usage
-        };
-        // Never below what the stream already committed, field by field: the
-        // engine is the untrusted side, and a closing `result` reporting less
-        // than it streamed would shrink the turn back under a grant it had
-        // already crossed. A committed figure only ever goes up.
-        if raise_to(&mut final_usage, run.stream_usage) {
-            tracing::warn!(agent = %ctx.agent.id, "{SHRUNK_CLOSING_USAGE}");
-            runtime.apply(Commit::new().event(ctx.draft(EventKind::Custom {
-                name: PROTOCOL_NOTE_EVENT.into(),
-                payload: json!({ "note": SHRUNK_CLOSING_USAGE }),
-            })))?;
-        }
-        let billed = run.outcome.cost_usd.or_else(|| {
-            run.stream_usage
-                .cost_complete
-                .then_some(run.stream_usage.cost_usd)
-        });
-        final_usage.set_cost(billed);
-        // Keep request estimates; non-request streams estimate a run's counters.
-        // An agent roll-up may also contain other models and must never be repriced.
-        final_usage.estimated_cost_usd = match billed {
-            Some(_) => None,
-            // A run total merges requests with different prompt tiers.
-            None if run.request_usage_seen => run
-                .pricing
-                .request_estimate_of(&final_usage, &run.stream_usage),
-            None => run.pricing.estimate_of(&final_usage),
-        };
-        if run.outcome.cost_usd.is_none() {
-            final_usage.cost_basis = if final_usage.estimated_cost_usd.is_some() {
-                aether_core::model::CostBasis::ListPrice
-            } else {
-                run.stream_usage.cost_basis
-            };
-        }
+        let final_usage = closing_usage(runtime, ctx, run)?;
         reconciled = Some(final_usage);
         ctx.agent.stats.usage = before;
         ctx.turn_usage = turn_before;
         ctx.add_usage(final_usage);
+        debug_assert!(ctx.agent.stats.usage.total_tokens() >= before.total_tokens());
+        debug_assert!(ctx.agent.stats.usage.cost_usd >= before.cost_usd);
     } else {
         // The engine's own turn total stands in only when nothing this turn was
         // priced; adding it on top of priced invocations would count the turn
@@ -696,4 +662,62 @@ fn settle_usage(runtime: &Arc<Runtime>, ctx: &mut TurnCtx, run: &DriveResult) ->
     runtime.apply_held(hold, commit)?;
 
     Ok(())
+}
+
+/// Reconcile closing counters and cost against this run's streamed accounting.
+fn closing_usage(runtime: &Arc<Runtime>, ctx: &TurnCtx, run: &DriveResult) -> Result<Usage> {
+    debug_assert!(
+        run.usage_before.is_some(),
+        "reconciliation needs a run baseline"
+    );
+    debug_assert!(run.usage_seen, "the baseline belongs to streamed usage");
+    let mut usage = if run.outcome.usage.total_tokens() > 0 {
+        run.outcome.usage
+    } else {
+        run.stream_usage
+    };
+    let closing_tokens = usage.total_tokens();
+    // The engine is untrusted: a closing receipt below the stream must not
+    // shrink a turn back under a grant it already crossed.
+    let raised = raise_to(&mut usage, run.stream_usage);
+    let billed = run.outcome.cost_usd.or_else(|| {
+        run.stream_usage
+            .cost_complete
+            .then_some(run.stream_usage.cost_usd)
+    });
+    usage.set_cost(billed);
+    // Preserve request estimates; merged counters cannot select prompt tiers.
+    usage.estimated_cost_usd = match billed {
+        Some(_) => None,
+        None if run.request_usage_seen => {
+            run.pricing.request_estimate_of(&usage, &run.stream_usage)
+        }
+        None => run.pricing.estimate_of(&usage),
+    };
+    if run.outcome.cost_usd.is_none() {
+        usage.cost_basis = if usage.estimated_cost_usd.is_some() {
+            aether_core::model::CostBasis::ListPrice
+        } else {
+            run.stream_usage.cost_basis
+        };
+    } else if raised {
+        run.pricing
+            .price_closing_shortfall(&mut usage, &run.outcome.usage);
+    }
+    if raised {
+        let missing = if usage.total_tokens() == closing_tokens {
+            "only reasoning detail was missing, the cost is unaffected"
+        } else if usage.cost_complete {
+            "the missing part is priced from the stream"
+        } else {
+            "the missing part is left out of the billed cost"
+        };
+        let note = format!("{SHRUNK_CLOSING_USAGE}; {missing}");
+        tracing::warn!(agent = %ctx.agent.id, "{note}");
+        runtime.apply(Commit::new().event(ctx.draft(EventKind::Custom {
+            name: PROTOCOL_NOTE_EVENT.into(),
+            payload: json!({ "note": note }),
+        })))?;
+    }
+    Ok(usage)
 }

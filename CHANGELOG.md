@@ -4,6 +4,15 @@ What each release of Aether brings, newest first. Aether follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The section of a
 release is also the text of its GitHub release.
 
+## Unreleased
+
+### Fixed
+
+- **Engine costs include requests missing from the closing receipt.** Streamed
+  tokens omitted when Claude Code stops after a wait are now priced beside the
+  reported cost. When no billed rate is available, the cost is marked incomplete
+  and an API-equivalent estimate is shown where available.
+
 ## 1.0.4
 
 Keep live replies visible while children work and when navigating approvals.

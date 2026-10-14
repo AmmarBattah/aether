@@ -143,6 +143,45 @@ async fn usage_deltas_preserve_context_and_do_not_double_count_turn_totals() {
 }
 
 #[tokio::test]
+async fn closing_receipt_without_reasoning_detail_leaves_cost_unaffected() {
+    let h = harness_with_engine(
+        Arc::new(DeltaUsageEngine {
+            report_outcome: true,
+        }),
+        Arc::new(Mutex::new(Vec::new())),
+        Arc::new(Mutex::new(Vec::new())),
+    )
+    .await;
+    let id = chat_agent(&h);
+    h.runtime
+        .send_message(id, vec![ContentBlock::text("Report usage")], Actor::user())
+        .unwrap();
+    let agent = wait_for(h.store.as_ref(), id, |a| {
+        a.stats.turns == 1 && a.status.kind() == AgentStatusKind::Waiting
+    })
+    .await;
+    assert_eq!(agent.stats.usage.estimated_cost_usd, None);
+    let notes: Vec<_> = h
+        .store
+        .events(0, 1000, &EventFilter::for_agent(id))
+        .unwrap()
+        .into_iter()
+        .filter_map(|event| match event.kind {
+            EventKind::Custom { name, payload } if name == "engine.protocol_note" => {
+                Some(payload["note"].as_str().unwrap().to_owned())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(notes.len(), 1);
+    assert_eq!(
+        notes[0],
+        "the engine's closing receipt omitted streamed usage; only reasoning detail was missing, the cost is unaffected"
+    );
+    h.runtime.shutdown().await;
+}
+
+#[tokio::test]
 async fn interrupted_usage_stream_keeps_consumed_tokens_without_a_final_total() {
     let h = harness_with_engine(
         Arc::new(DeltaUsageEngine {

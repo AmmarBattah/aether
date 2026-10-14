@@ -109,8 +109,7 @@ const PROTOCOL_NOTE_CHARS: usize = 300;
 
 pub(super) const PROTOCOL_NOTE_EVENT: &str = "engine.protocol_note";
 
-pub(super) const SHRUNK_CLOSING_USAGE: &str =
-    "the engine's closing usage was below what it streamed; the streamed figure stands";
+pub(super) const SHRUNK_CLOSING_USAGE: &str = "the engine's closing receipt omitted streamed usage";
 
 /// Put a departure from the protocol billing depends on - a counter the engine
 /// restarted, a field it stopped sending, a turn it never accounted - on the

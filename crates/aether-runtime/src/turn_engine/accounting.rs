@@ -145,6 +145,49 @@ impl TurnPricing {
         };
         Some(streamed.estimated_cost_usd.unwrap_or(0.0) + rate.cost_of(&extra))
     }
+
+    /// Add base-rate pricing for streamed tokens absent from a priced closing receipt.
+    /// Missing request boundaries make threshold pricing unavailable.
+    pub(super) fn price_closing_shortfall(&self, total: &mut Usage, closing: &Usage) {
+        use aether_core::model::CostBasis;
+        debug_assert!(self.billed.is_none() || self.estimate.is_none());
+        debug_assert!(total.cost_complete && total.cost_basis == CostBasis::ProviderReported);
+        debug_assert!(
+            total.input_tokens >= closing.input_tokens
+                && total.output_tokens >= closing.output_tokens
+                && total.cache_read_tokens >= closing.cache_read_tokens
+                && total.cache_write_tokens >= closing.cache_write_tokens
+                && total.reasoning_tokens.unwrap_or(0) >= closing.reasoning_tokens.unwrap_or(0),
+            "the raised closing counters must cover the receipt"
+        );
+        let mut shortfall = Usage {
+            input_tokens: total.input_tokens.saturating_sub(closing.input_tokens),
+            output_tokens: total.output_tokens.saturating_sub(closing.output_tokens),
+            cache_read_tokens: total
+                .cache_read_tokens
+                .saturating_sub(closing.cache_read_tokens),
+            cache_write_tokens: total
+                .cache_write_tokens
+                .saturating_sub(closing.cache_write_tokens),
+            ..Usage::default()
+        };
+        if shortfall.total_tokens() == 0 {
+            return;
+        }
+        // Missing request boundaries force base rates, ignoring above_threshold.
+        // Billed costs are therefore a lower bound for a tier-crossing request.
+        let base_rate = |rate: ModelCost| ModelCost {
+            above_threshold: None,
+            ..rate
+        };
+        shortfall.price_from(self.billed.map(base_rate), self.estimate.map(base_rate));
+        total.cost_usd += shortfall.cost_usd;
+        total.cost_complete &= shortfall.cost_complete;
+        total.estimated_cost_usd = shortfall.estimated_cost_usd;
+        if self.billed.is_some() || self.estimate.is_some() {
+            total.cost_basis = total.cost_basis.combine(shortfall.cost_basis);
+        }
+    }
 }
 
 /// Raise every token field of `usage` to `floor` where `floor` is higher.
@@ -253,4 +296,151 @@ fn descendant_usage(runtime: &Arc<Runtime>, agent: AgentId) -> Result<Usage> {
         .get(&agent)
         .copied()
         .unwrap_or_default())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aether_core::model::{CostBasis, ModelCostTier};
+
+    fn shortfall_rate() -> ModelCost {
+        ModelCost {
+            input_per_mtok: 1_000_000.0,
+            output_per_mtok: 2_000_000.0,
+            cache_read_per_mtok: 3_000_000.0,
+            cache_write_per_mtok: 4_000_000.0,
+            above_threshold: Some(ModelCostTier {
+                prompt_tokens: 1,
+                input_per_mtok: 10_000_000.0,
+                output_per_mtok: 20_000_000.0,
+                cache_read_per_mtok: 30_000_000.0,
+                cache_write_per_mtok: 40_000_000.0,
+            }),
+        }
+    }
+
+    fn shortfall_counters() -> (Usage, Usage) {
+        let closing = Usage {
+            input_tokens: 20,
+            output_tokens: 2,
+            cache_read_tokens: 4,
+            cache_write_tokens: 6,
+            reasoning_tokens: Some(3),
+            cost_usd: 999.0,
+            cost_basis: CostBasis::ProviderReported,
+            estimated_cost_usd: Some(999.0),
+            ..Default::default()
+        };
+        let raised = Usage {
+            input_tokens: 22,
+            output_tokens: 6,
+            cache_read_tokens: 12,
+            cache_write_tokens: 22,
+            reasoning_tokens: Some(5),
+            cost_usd: 10.0,
+            estimated_cost_usd: None,
+            ..closing
+        };
+        (closing, raised)
+    }
+
+    #[test]
+    fn closing_shortfall_prices_each_token_field_at_base_rates() {
+        let (closing, mut raised) = shortfall_counters();
+        let original = raised;
+        let pricing = TurnPricing {
+            billed: Some(shortfall_rate()),
+            estimate: None,
+        };
+        pricing.price_closing_shortfall(&mut raised, &closing);
+        assert_eq!(raised.cost_usd, 108.0);
+        assert_eq!(raised.cost_basis, CostBasis::Mixed);
+        assert!(raised.cost_complete);
+        assert_eq!(raised.estimated_cost_usd, None);
+        assert_eq!(
+            raised,
+            Usage {
+                cost_usd: 108.0,
+                cost_basis: CostBasis::Mixed,
+                ..original
+            }
+        );
+    }
+
+    #[test]
+    fn closing_shortfall_estimates_only_missing_tokens_at_base_rates() {
+        let (closing, mut raised) = shortfall_counters();
+        let original = raised;
+        let pricing = TurnPricing {
+            billed: None,
+            estimate: Some(shortfall_rate()),
+        };
+        pricing.price_closing_shortfall(&mut raised, &closing);
+        assert_eq!(raised.cost_usd, 10.0);
+        assert!(!raised.cost_complete);
+        assert_eq!(raised.cost_basis, CostBasis::Mixed);
+        assert_eq!(raised.estimated_cost_usd, Some(98.0));
+        assert_eq!(
+            raised,
+            Usage {
+                cost_complete: false,
+                cost_basis: CostBasis::Mixed,
+                estimated_cost_usd: Some(98.0),
+                ..original
+            }
+        );
+    }
+
+    #[test]
+    fn closing_shortfall_without_rates_keeps_an_incomplete_provider_floor() {
+        let (closing, mut raised) = shortfall_counters();
+        let original = raised;
+        TurnPricing::default().price_closing_shortfall(&mut raised, &closing);
+        assert_eq!(raised.cost_usd, 10.0);
+        assert_eq!(raised.cost_basis, CostBasis::ProviderReported);
+        assert!(!raised.cost_complete);
+        assert_eq!(raised.estimated_cost_usd, None);
+        assert_eq!(
+            raised,
+            Usage {
+                cost_complete: false,
+                ..original
+            }
+        );
+    }
+
+    #[test]
+    fn closing_shortfall_does_not_bill_reasoning_as_additional_output() {
+        let closing = Usage {
+            output_tokens: 100,
+            cost_usd: 10.0,
+            cost_basis: CostBasis::ProviderReported,
+            ..Default::default()
+        };
+        let raised = Usage {
+            reasoning_tokens: Some(50),
+            ..closing
+        };
+        for pricing in [
+            TurnPricing {
+                billed: Some(shortfall_rate()),
+                estimate: None,
+            },
+            TurnPricing {
+                billed: None,
+                estimate: Some(shortfall_rate()),
+            },
+            TurnPricing::default(),
+        ] {
+            let mut total = raised;
+            pricing.price_closing_shortfall(&mut total, &closing);
+            assert_eq!(total.cost_usd, 10.0);
+            assert_eq!(total.output_tokens, 100);
+            assert_eq!(total.reasoning_tokens, Some(50));
+            assert!(total.cost_complete);
+            assert_eq!(total.cost_basis, CostBasis::ProviderReported);
+            assert_eq!(total.estimated_cost_usd, None);
+            assert_eq!(total, raised);
+        }
+    }
 }
