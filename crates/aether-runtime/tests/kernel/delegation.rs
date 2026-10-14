@@ -33,6 +33,43 @@ async fn delegate_leaf_setting_reaches_the_child_config() {
 }
 
 #[tokio::test]
+async fn delegate_host_context_inherits_the_parent_unless_set() {
+    use aether_core::agent::HostContext;
+    for (parent_context, requested, expected) in [
+        (HostContext::Full, None, HostContext::Full),
+        (HostContext::Lean, None, HostContext::Lean),
+        (HostContext::Lean, Some("full"), HostContext::Full),
+        (HostContext::Full, Some("lean"), HostContext::Lean),
+    ] {
+        let mut input = json!({"role":"worker", "objective":"check", "model":"anthropic/claude-sonnet-5-5", "effort":"low", "wait":true});
+        if let Some(host_context) = requested {
+            input["host_context"] = json!(host_context);
+        }
+        let h = harness(vec![
+            ScriptedClient::tool_call("delegate", input),
+            ScriptedClient::tool_call("complete_task", json!({"summary":"done"})),
+            ScriptedClient::tool_call("complete_task", json!({"summary":"done"})),
+        ])
+        .await;
+        let mut parent_spec = spec("delegate");
+        parent_spec.config.as_mut().unwrap().host_context = parent_context;
+        let (parent, _) = h.runtime.create_agent(parent_spec, Actor::user()).unwrap();
+        h.wait_until(parent.id, |s| s.is_terminal()).await;
+        let children = h
+            .store
+            .agents(&AgentFilter {
+                parent: Some(parent.id),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].config.host_context, expected);
+        let stored_parent = h.store.agent(parent.id).unwrap().unwrap();
+        assert_eq!(stored_parent.config.host_context, parent_context);
+    }
+}
+
+#[tokio::test]
 async fn leaf_cannot_delegate_even_when_the_tool_is_called_directly() {
     let h = harness(vec![
         ScriptedClient::tool_calls(&[

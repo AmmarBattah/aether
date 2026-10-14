@@ -20,6 +20,7 @@ fn turn() -> EngineTurn {
         hidden_env: Vec::new(),
         tool_hidden_env: Vec::new(),
         summary_only: false,
+        lean_host_context: false,
         network_access: true,
         bypass_permissions: false,
         mcp: Some(McpBridge {
@@ -241,6 +242,84 @@ fn checkpoint_turn_disables_tools_mcp_and_hooks() {
             .to_string()
         )
     );
+}
+
+const LEAN_FLAGS: [&str; 2] = ["--disable-slash-commands", "--strict-mcp-config"];
+
+fn occurrences(args: &[String], flag: &str) -> usize {
+    args.iter().filter(|arg| *arg == flag).count()
+}
+
+/// The launch with `lean_host_context` off and on, for one turn shape.
+fn full_and_lean(network_access: bool, summary_only: bool) -> (Vec<String>, Vec<String>) {
+    let engine = ClaudeCodeEngine::new("claude", "test");
+    let mut t = turn();
+    t.network_access = network_access;
+    t.summary_only = summary_only;
+    let full = engine.args(&t);
+    t.lean_host_context = true;
+    (full, engine.args(&t))
+}
+
+#[test]
+fn full_host_context_launch_keeps_native_skills_and_mcp_servers() {
+    let (full, _) = full_and_lean(true, false);
+    for flag in LEAN_FLAGS {
+        assert_eq!(occurrences(&full, flag), 0, "{flag}");
+    }
+    assert!(!full.contains(&"--setting-sources".into()));
+}
+
+#[test]
+fn lean_online_launch_adds_both_flags_and_keeps_aether_mcp() {
+    let (full, lean) = full_and_lean(true, false);
+    for flag in LEAN_FLAGS {
+        assert_eq!(occurrences(&lean, flag), 1, "{flag}");
+    }
+    let without: Vec<_> = lean
+        .iter()
+        .filter(|arg| !LEAN_FLAGS.contains(&arg.as_str()))
+        .cloned()
+        .collect();
+    assert_eq!(without, full);
+    // Lean keeps the operator's settings, CLAUDE.md and hooks.
+    assert!(!lean.contains(&"--setting-sources".into()));
+    let at = lean.iter().position(|arg| arg == "--mcp-config").unwrap();
+    let config: Value = serde_json::from_str(&lean[at + 1]).unwrap();
+    assert!(config["mcpServers"]["aether"].is_object());
+}
+
+#[test]
+fn lean_offline_launch_adds_only_the_missing_flag() {
+    let (full, lean) = full_and_lean(false, false);
+    assert_eq!(occurrences(&full, "--strict-mcp-config"), 1);
+    for flag in LEAN_FLAGS {
+        assert_eq!(occurrences(&lean, flag), 1, "{flag}");
+    }
+    let without: Vec<_> = lean
+        .iter()
+        .filter(|arg| *arg != "--disable-slash-commands")
+        .cloned()
+        .collect();
+    assert_eq!(without, full);
+}
+
+#[test]
+fn lean_summary_launch_is_the_summary_launch() {
+    let (full, lean) = full_and_lean(true, true);
+    assert_eq!(lean, full);
+    for flag in LEAN_FLAGS {
+        assert_eq!(occurrences(&lean, flag), 1, "{flag}");
+    }
+}
+
+#[test]
+fn lean_offline_summary_launch_is_the_offline_summary_launch() {
+    let (full, lean) = full_and_lean(false, true);
+    assert_eq!(lean, full);
+    for flag in LEAN_FLAGS {
+        assert_eq!(occurrences(&lean, flag), 1, "{flag}");
+    }
 }
 
 #[test]

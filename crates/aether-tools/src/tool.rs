@@ -149,6 +149,8 @@ pub enum HarnessAction {
         wait: bool,
         /// Whether the child is forbidden to create children of its own.
         leaf: bool,
+        /// `None` inherits the parent's; not a scope knob, so it may widen.
+        host_context: Option<aether_core::agent::HostContext>,
     },
     IntegrateWorkspace {
         child: AgentId,

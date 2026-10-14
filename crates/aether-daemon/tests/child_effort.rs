@@ -2,7 +2,7 @@
 
 mod support;
 
-use aether_protocol::PROTOCOL_VERSION;
+use aether_protocol::{PROTOCOL_VERSION, compat::MIN_PROTOCOL_VERSION};
 use serde_json::{Value, json};
 use support::{RawConn, TestDaemon};
 
@@ -55,5 +55,54 @@ async fn protocol_child_creation_requires_explicit_effort_including_keyed_reques
         child["result"]["Ok"]["data"]["config"]["effort"], "low",
         "{child}"
     );
+    daemon.stop().await;
+}
+
+#[tokio::test]
+async fn protocol_create_agent_keeps_a_lean_host_context_and_omits_full() {
+    let daemon = TestDaemon::start().await;
+    let mut oldest = RawConn::connect(&daemon.socket).await.unwrap();
+    let welcome = oldest.hello(MIN_PROTOCOL_VERSION).await.unwrap();
+    let features = welcome["features"].as_array().unwrap();
+    assert!(features.contains(&json!("host_context")), "{welcome}");
+    let created = oldest
+        .call(json!({
+            "cmd": "create_agent", "role": "root", "start": false,
+            "config": {"host_context": "lean"},
+            "model": {"provider": "claude-code", "model": "haiku"}
+        }))
+        .await;
+    let config = &created["result"]["Ok"]["data"]["config"];
+    assert_eq!(config["host_context"], "lean", "{created}");
+    let mut conn = RawConn::connect(&daemon.socket).await.unwrap();
+    let welcome = conn.hello(PROTOCOL_VERSION).await.unwrap();
+    let features = welcome["features"].as_array().unwrap();
+    assert!(features.contains(&json!("host_context")), "{welcome}");
+    for (config, expected) in [
+        (json!({"host_context": "lean"}), json!("lean")),
+        (json!({"host_context": "full"}), Value::Null),
+        (json!({}), Value::Null),
+    ] {
+        let created = conn
+            .call(json!({
+                "cmd": "create_agent", "role": "root", "start": false, "config": config,
+                "model": {"provider": "claude-code", "model": "haiku"}
+            }))
+            .await;
+        let agent = &created["result"]["Ok"]["data"];
+        assert_eq!(agent["config"]["host_context"], expected, "{created}");
+        let read = conn
+            .call(json!({"cmd": "get_agent", "id": agent["id"]}))
+            .await;
+        let config = &read["result"]["Ok"]["data"]["config"];
+        assert_eq!(config["host_context"], expected, "{read}");
+    }
+    let refused = conn
+        .call(json!({
+            "cmd": "create_agent", "role": "root", "start": false,
+            "config": {"host_context": "minimal"}
+        }))
+        .await;
+    assert!(refused["result"]["Err"].is_object(), "{refused}");
     daemon.stop().await;
 }

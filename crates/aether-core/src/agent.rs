@@ -15,8 +15,8 @@ mod status;
 mod wait;
 
 pub use config::{
-    AgentConfig, ApprovalDefault, ApprovalPolicy, DeadlineUpdate, ExecutionBackend, NetworkPolicy,
-    Scope,
+    AgentConfig, ApprovalDefault, ApprovalPolicy, DeadlineUpdate, ExecutionBackend, HostContext,
+    NetworkPolicy, Scope,
 };
 pub use status::{AgentStatus, AgentStatusKind, BlockReason, ExhaustionClass};
 pub use wait::{WaitCondition, WaitOracle};

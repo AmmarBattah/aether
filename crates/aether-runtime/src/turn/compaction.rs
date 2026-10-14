@@ -207,6 +207,7 @@ pub(super) async fn compaction_client(
             cwd: tool_ctx.cwd.clone(),
             extra_dirs: Vec::new(),
             summary_only: true,
+            lean_host_context: false,
             network_access: false,
             bypass_permissions: false,
             hidden_env: runtime.tools.engine_hidden_env().to_vec(),

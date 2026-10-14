@@ -52,6 +52,7 @@ pub(super) fn turn(session: Option<&str>, bypass: bool) -> EngineTurn {
         hidden_env: Vec::new(),
         tool_hidden_env: Vec::new(),
         summary_only: false,
+        lean_host_context: false,
         network_access: true,
         bypass_permissions: bypass,
         mcp: Some(crate::McpBridge {

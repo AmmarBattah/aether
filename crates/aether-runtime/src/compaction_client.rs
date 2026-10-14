@@ -288,6 +288,7 @@ mod tests {
                 cwd: "/unused-fixture".into(),
                 extra_dirs: vec![],
                 summary_only: true,
+                lean_host_context: false,
                 network_access: true,
                 bypass_permissions: false,
                 hidden_env: vec![],

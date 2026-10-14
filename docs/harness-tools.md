@@ -16,7 +16,7 @@ native tool discovery. The schemas in `aether-tools/src/builtin/harness.rs`
 | Inspect current state | `inspect_state` | Own agent/task, model, effort, context, budgets, concurrency and compaction policy. |
 | Retrieve stored output | `read_artifact` | Scoped UTF-8 text pages with byte offsets and continuation cursors; available to API agents and CLI engines. |
 | Inspect delegated work | `list_agents`, `list_tasks`, `read_task` | Scoped metadata pages and bounded task/result reads, including completed descendants. |
-| Delegate | `delegate` | Creates a tracked child and task; requires explicit `model` (`provider/model`) and `effort`; neither is inherited. Returned agent and task IDs are different identifiers. `workspace_mode` selects a shared workspace (the default) or an isolated Git worktree. |
+| Delegate | `delegate` | Creates a tracked child and task; requires explicit `model` (`provider/model`) and `effort`; neither is inherited. Returned agent and task IDs are different identifiers. `workspace_mode` selects a shared workspace (the default) or an isolated Git worktree. `host_context` (`full` or `lean`) is inherited from the parent when omitted; see [lean host context](engines.md#lean-host-context). |
 | Integrate a child workspace | `integrate_workspace` | Applies an isolated child's changes to its parent's workspace after the child finishes, with conflict checks. The child workspace is retained. |
 | Steer | `send_message` | Messages an agent; `subtree=true` also delivers to its live descendants. |
 | Stop work | `cancel_agent` | Cancels an agent and its live descendants through runtime authority checks. |

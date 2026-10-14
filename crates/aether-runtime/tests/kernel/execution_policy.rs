@@ -2,10 +2,11 @@
 use super::*;
 
 /// Every config knob persists at creation; mutable knobs can then change on a
-/// live agent and emit an event. `leaf` is intentionally creation-only.
+/// live agent and emit an event. `leaf` and `host_context` are intentionally
+/// creation-only.
 #[tokio::test]
 async fn every_config_knob_persists_at_creation_and_mutable_knobs_update_live() {
-    use aether_core::agent::{ExecutionBackend, NetworkPolicy};
+    use aether_core::agent::{ExecutionBackend, HostContext, NetworkPolicy};
     use aether_core::model::Effort;
     use aether_core::task::Priority;
     use aether_core::tool::ToolExposure;
@@ -28,6 +29,7 @@ async fn every_config_knob_persists_at_creation_and_mutable_knobs_update_live() 
         long_lived: true,
         leaf: true,
         concurrency: Some(3),
+        host_context: HostContext::Lean,
     };
     let scope = Scope {
         workspace_root: Some(h.workspace_root.clone()),
@@ -101,6 +103,7 @@ async fn every_config_knob_persists_at_creation_and_mutable_knobs_update_live() 
         "live updates must preserve the creation-only leaf setting"
     );
     assert_eq!(c.concurrency, Some(1));
+    assert_eq!(c.host_context, HostContext::Lean);
     assert_eq!(
         updated.model,
         ModelRef::new("anthropic", "claude-sonnet-5-5")

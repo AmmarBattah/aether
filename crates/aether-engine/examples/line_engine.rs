@@ -269,6 +269,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         cwd: std::env::current_dir()?,
         extra_dirs: Vec::new(),
         summary_only: false,
+        lean_host_context: false,
         network_access: true,
         bypass_permissions: false,
         hidden_env: Vec::new(),

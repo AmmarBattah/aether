@@ -61,6 +61,7 @@ pub(crate) async fn apply_action(
             workspace_mode,
             wait,
             leaf,
+            host_context,
         } => {
             let parent = runtime.store.agent(ctx.agent.id)?.ok_or_else(|| {
                 crate::RuntimeError::Invalid("Delegating parent no longer exists".into())
@@ -222,6 +223,9 @@ pub(crate) async fn apply_action(
             config.long_lived = false;
             config.leaf = leaf;
             config.max_turns = None;
+            if let Some(host_context) = host_context {
+                config.host_context = host_context;
+            }
             let spec = CreateAgentSpec {
                 role,
                 name,

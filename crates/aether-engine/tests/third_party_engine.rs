@@ -30,6 +30,7 @@ fn turn(cwd: PathBuf) -> EngineTurn {
         cwd,
         extra_dirs: Vec::new(),
         summary_only: false,
+        lean_host_context: false,
         network_access: true,
         bypass_permissions: false,
         hidden_env: vec!["ANTHROPIC_API_KEY".into()],

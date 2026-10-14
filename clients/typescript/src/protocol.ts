@@ -157,6 +157,7 @@ export * from "./protocol/types/GithubWatcherConfig.ts";
 export * from "./protocol/types/GithubWatcherStatus.ts";
 export * from "./protocol/types/Health.ts";
 export * from "./protocol/types/Hello.ts";
+export * from "./protocol/types/HostContext.ts";
 export * from "./protocol/types/HttpError.ts";
 export * from "./protocol/types/HttpErrorBody.ts";
 export * from "./protocol/types/HttpErrorCode.ts";

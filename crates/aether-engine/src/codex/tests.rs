@@ -77,6 +77,7 @@ print(json.dumps({'type':'turn.completed','usage':{}}), flush=True)
         new_session_id: "new".into(),
         cwd: dir.path().into(),
         summary_only: true,
+        lean_host_context: false,
         network_access: false,
         ..turn_with_effort(None)
     };
@@ -160,6 +161,7 @@ async fn summary_exec_does_not_warn_about_disabled_commands() {
     let turn = EngineTurn {
         cwd: dir.path().into(),
         summary_only: true,
+        lean_host_context: false,
         tool_hidden_env: vec!["PROVIDER_TOKEN".into()],
         ..turn_with_effort(None)
     };
@@ -319,6 +321,7 @@ fn turn_with_effort(effort: Option<Effort>) -> EngineTurn {
         hidden_env: Vec::new(),
         tool_hidden_env: Vec::new(),
         summary_only: false,
+        lean_host_context: false,
         network_access: true,
         bypass_permissions: false,
         mcp: None,

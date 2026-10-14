@@ -240,6 +240,28 @@ impl fmt::Display for ApprovalDefault {
     }
 }
 
+/// Engine host setup a session loads. Lean drops Claude Code's native skills
+/// and non-Aether MCP servers; other engines ignore it.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum HostContext {
+    #[default]
+    Full,
+    Lean,
+}
+
+impl HostContext {
+    pub fn is_full(&self) -> bool {
+        *self == HostContext::Full
+    }
+
+    pub fn is_lean(&self) -> bool {
+        *self == HostContext::Lean
+    }
+}
+
 /// Per-agent configuration the runtime enforces.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AgentConfig {
@@ -287,6 +309,9 @@ pub struct AgentConfig {
     /// not per level.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub concurrency: Option<usize>,
+    /// Engine-native host setup the session loads; omitted on the wire when full.
+    #[serde(default, skip_serializing_if = "HostContext::is_full")]
+    pub host_context: HostContext,
 }
 
 impl Default for AgentConfig {
@@ -305,6 +330,7 @@ impl Default for AgentConfig {
             long_lived: false,
             leaf: false,
             concurrency: None,
+            host_context: HostContext::Full,
         }
     }
 }

@@ -157,6 +157,8 @@ pub mod features {
     pub const DELTAS: &str = "deltas";
     pub const PUBLISH_ARTIFACT: &str = "publish_artifact";
     pub const ARTIFACT_BYTES: &str = "artifact_bytes";
+    /// The daemon accepts `AgentConfig.host_context`.
+    pub const HOST_CONTEXT: &str = "host_context";
 }
 
 mod handshake;

@@ -92,6 +92,17 @@ it refuses a version 18 hello as outside its window rather than dropping them.
 The versioning contract and negotiation are defined in `aether-protocol`'s
 `PROTOCOL_VERSION` and `compat` module.
 
+## Optional features
+
+The `Welcome` lists optional features the daemon supports; a client ignores
+names it does not know. `host_context` means `create_agent` accepts
+`config.host_context` (`"full"` or `"lean"`, see
+[lean host context](engines.md#lean-host-context)). It is left off the wire
+when full, so an older daemon or client that never sees it behaves as before.
+A client must check that the `Welcome` lists `host_context` before sending
+`config.host_context`: an older daemon silently ignores the field and creates
+a full agent.
+
 ## Images on a message
 
 Protocol 19 lets `send_message` carry images next to its text:

@@ -4,6 +4,7 @@
 import type {
   ApprovalPolicy,
   Effort,
+  HostContext,
   Priority,
   ToolExposure,
 } from "../../protocol.ts";
@@ -17,6 +18,7 @@ export interface AgentConfig {
   "cost_budget"?: number | null;
   "deadline"?: string | null;
   "effort"?: Effort | null;
+  "host_context"?: HostContext;
   "instructions"?: string | null;
   "leaf"?: boolean;
   "long_lived"?: boolean;

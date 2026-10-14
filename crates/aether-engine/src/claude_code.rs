@@ -134,6 +134,13 @@ impl ClaudeCodeEngine {
                 "--disable-slash-commands".into(),
             ]);
         }
+        // Summary turns already pass both flags, offline turns the MCP one.
+        if turn.lean_host_context && !turn.summary_only {
+            args.push("--disable-slash-commands".into());
+            if turn.network_access {
+                args.push("--strict-mcp-config".into());
+            }
+        }
         let mut settings = json!({"env": {}});
         if let Some(ttl) = self.prompt_cache_ttl {
             settings["env"]["CLAUDE_CODE_PROMPT_CACHE_TTL"] = json!(ttl.as_str());

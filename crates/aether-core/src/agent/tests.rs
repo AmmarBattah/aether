@@ -15,6 +15,22 @@ fn leaf_config_defaults_off_and_round_trips() {
     assert!(serde_json::from_str::<AgentConfig>(r#"{"leaf":"true"}"#).is_err());
 }
 
+#[test]
+fn host_context_defaults_full_off_the_wire_and_lean_round_trips() {
+    let old: AgentConfig = serde_json::from_str("{}").unwrap();
+    assert_eq!(old.host_context, HostContext::Full);
+    let full = serde_json::to_value(&old).unwrap();
+    assert!(full.get("host_context").is_none(), "{full}");
+    let lean = AgentConfig {
+        host_context: HostContext::Lean,
+        ..old
+    };
+    let value = serde_json::to_value(&lean).unwrap();
+    assert_eq!(value["host_context"], "lean");
+    assert_eq!(serde_json::from_value::<AgentConfig>(value).unwrap(), lean);
+    assert!(serde_json::from_str::<AgentConfig>(r#"{"host_context":"minimal"}"#).is_err());
+}
+
 fn agent_with(deadline: Option<Timestamp>) -> Agent {
     let at = crate::time::now();
     Agent {

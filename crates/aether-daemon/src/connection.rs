@@ -302,6 +302,7 @@ where
                                                     features::DELTAS.into(),
                                                     features::ARTIFACT_BYTES.into(),
                                                     features::PUBLISH_ARTIFACT.into(),
+                                                    features::HOST_CONTEXT.into(),
                                                 ],
                                                 daemon_protocol_version: Some(
                                                     aether_protocol::PROTOCOL_VERSION,

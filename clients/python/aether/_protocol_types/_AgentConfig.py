@@ -15,6 +15,7 @@ class AgentConfig(TypedDict, total=False):
     cost_budget: float | None  # optional
     deadline: str | None  # optional
     effort: _protocol.Effort | None  # optional
+    host_context: _protocol.HostContext  # optional
     instructions: str | None  # optional
     leaf: bool  # optional
     long_lived: bool  # optional

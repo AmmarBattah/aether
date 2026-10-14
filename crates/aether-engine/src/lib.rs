@@ -128,6 +128,9 @@ pub struct EngineTurn {
     pub extra_dirs: Vec<PathBuf>,
     /// Isolated checkpoint generation: restrict tools and enforce read-only execution.
     pub summary_only: bool,
+    /// Leave out the engine's own skills and non-Aether MCP servers
+    /// (`HostContext::Lean`). Engines without such a switch ignore it.
+    pub lean_host_context: bool,
     /// Whether this agent scope permits native web and sandbox network access.
     pub network_access: bool,
     /// Let the engine run its tools without asking anyone.

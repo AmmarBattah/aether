@@ -85,6 +85,40 @@ async fn delegate_leaf_is_explicit_and_defaults_off() {
 }
 
 #[tokio::test]
+async fn delegate_host_context_is_optional_and_named_on_error() {
+    use aether_core::agent::HostContext;
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_in(dir.path());
+    for (setting, expected) in [
+        (None, None),
+        (Some("full"), Some(HostContext::Full)),
+        (Some("lean"), Some(HostContext::Lean)),
+    ] {
+        let mut input =
+            json!({"role":"worker", "objective":"check", "model":"mock/m", "effort":"low"});
+        if let Some(host_context) = setting {
+            input["host_context"] = json!(host_context);
+        }
+        let action = act(&Delegate, &ctx, input).await.unwrap();
+        assert!(
+            matches!(action, HarnessAction::Delegate { host_context, .. } if host_context == expected)
+        );
+    }
+    let invalid = json!({"role":"worker", "objective":"check", "model":"mock/m", "effort":"low", "host_context":"minimal"});
+    let err = act(&Delegate, &ctx, invalid).await.unwrap_err();
+    let ToolError::InvalidInput(msg) = &err else {
+        panic!("expected InvalidInput, got {err:?}");
+    };
+    assert!(msg.contains("delegate.host_context"), "{msg}");
+    assert!(msg.contains("minimal"), "{msg}");
+    let schema = Delegate.descriptor().spec.input_schema;
+    assert_eq!(
+        schema["properties"]["host_context"]["enum"],
+        json!(["full", "lean"])
+    );
+}
+
+#[tokio::test]
 async fn delegate_workspace_mode_is_explicit_and_shared_by_default() {
     let dir = tempfile::tempdir().unwrap();
     let ctx = ctx_in(dir.path());

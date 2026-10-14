@@ -180,6 +180,26 @@ see Claude Code's
 [environment variables](https://code.claude.com/docs/en/env-vars), and the
 [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
 
+## Lean host context
+
+Claude Code loads the operator's skill listing and every user, plugin and
+claude.ai MCP server into each session. An agent created with
+`config.host_context: "lean"` leaves those out: its Claude Code launch adds
+`--disable-slash-commands` and `--strict-mcp-config`. The default, `"full"`,
+launches exactly as before. Codex and API models ignore the setting.
+
+A lean session keeps CLAUDE.md files, hooks, settings, permissions, plugins,
+every built-in tool and Aether's own MCP server. Measured with one operator's
+setup on Haiku, an agent's first prompt fell from about 26.6k to 16.6k tokens
+(38%). A delegated child inherits
+its parent's value unless `delegate` sets `host_context`; set `"full"` for a
+task that needs a native skill or another MCP server.
+
+Hooks and settings stay on ordinary online turns. Network-denied turns already
+drop operator settings and hooks with `--setting-sources ""` and pass
+`--strict-mcp-config`, so lean only adds `--disable-slash-commands` there.
+Summary and compaction turns already pass both flags and are unchanged.
+
 ## Native hooks and isolation
 
 Ordinary network-enabled turns inherit native hook configuration. Aether disables

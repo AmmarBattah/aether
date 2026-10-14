@@ -6,6 +6,15 @@ release is also the text of its GitHub release.
 
 ## Unreleased
 
+### New
+
+- **Lean host context for Claude Code agents.** An agent created with
+  `host_context: "lean"` starts Claude Code without the operator's skill
+  listing or MCP servers other than Aether's own. CLAUDE.md, hooks, settings,
+  plugins and built-in tools stay. Delegated children inherit it unless
+  `delegate` sets `host_context`. It is off by default; measured with the
+  operator's setup on Haiku, the first prompt was 38% smaller.
+
 ### Fixed
 
 - **Engine costs include requests missing from the closing receipt.** Streamed

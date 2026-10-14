@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
 use aether_core::{
-    agent::NetworkPolicy,
+    agent::{HostContext, NetworkPolicy},
     id::AgentId,
     model::{Effort, ModelRef},
 };
@@ -47,6 +47,9 @@ struct DelegateInput {
     wait: bool,
     #[serde(default)]
     leaf: bool,
+    // A raw `Value` for the same reason as `effort`.
+    #[serde(default)]
+    host_context: Option<Value>,
 }
 
 fn yes() -> bool {
@@ -78,6 +81,7 @@ impl Tool for Delegate {
                     "allowed_paths": {"type": "array", "items": {"type": "string"}, "description": "Paths the child owns, enforced by the runtime rather than by prose in the objective. Exactly what is enforced: the file tools refuse any path outside the workspace root and these, and Aether's built-in shell refuses git commands that discard working-tree changes outside them (`git stash`, `git checkout -- <paths>`, `git restore`, `git reset --hard`, `git clean`); other shell writes are not sandboxed, and these paths widen the file tools rather than narrowing the workspace - use workspace_root for that. Use it whenever siblings share a workspace so each child owns distinct files; like every scope field it can only narrow yours."},
                     "network": {"type": "boolean", "description": "Omit to inherit your network policy. Read-only work does not require disabling network. Set false when the task requires offline execution; cannot exceed your own policy."},
                     "leaf": {"type": "boolean", "default": false, "description": "Create a child that cannot delegate and receives fewer coordination tools."},
+                    "host_context": {"type": "string", "enum": ["full", "lean"], "description": "lean starts a Claude Code child without its native skills and non-Aether MCP servers, for a smaller context; full restores them. Omit to inherit yours."},
                     "wait": {"type": "boolean", "default": true}
                 },
                 "required": ["role", "objective", "model", "effort"],
@@ -116,6 +120,11 @@ impl Tool for Delegate {
             ))
         })?;
         let effort: Effort = crate::builtin::parse_field(&input.effort, "delegate.effort")?;
+        let host_context: Option<HostContext> = input
+            .host_context
+            .as_ref()
+            .map(|value| crate::builtin::parse_field(value, "delegate.host_context"))
+            .transpose()?;
         let wants_scope = input.workspace_root.is_some()
             || !input.allowed_paths.is_empty()
             || input.network.is_some();
@@ -158,6 +167,7 @@ impl Tool for Delegate {
             workspace_mode: input.workspace_mode,
             wait: input.wait,
             leaf: input.leaf,
+            host_context,
         }))
     }
 }
