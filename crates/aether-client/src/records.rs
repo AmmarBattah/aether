@@ -176,7 +176,20 @@ impl Client {
         }
     }
 
+    /// A daemon that cannot filter by recorder would answer with every
+    /// memory, which reads as all of it being theirs, so that is refused here.
     pub async fn memories(&self, query: MemoryQuerySpec) -> Result<Vec<MemoryRecord>> {
+        if query.recorded_by.is_some()
+            && !self.welcome().is_some_and(|w| {
+                w.features
+                    .iter()
+                    .any(|f| f == aether_protocol::features::MEMORY_RECORDED_BY)
+            })
+        {
+            return Err(ClientError::Incompatible(
+                "daemon cannot filter memories by recorder; update Aether".into(),
+            ));
+        }
         match self.request(Command::Memories { query }).await? {
             Reply::Memories(m) => Ok(m),
             other => Err(unexpected("memories", &other)),

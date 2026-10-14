@@ -184,6 +184,7 @@ export * from "./protocol/types/MemoryKind.ts";
 export * from "./protocol/types/MemoryProvenance.ts";
 export * from "./protocol/types/MemoryQuerySpec.ts";
 export * from "./protocol/types/MemoryRecord.ts";
+export * from "./protocol/types/MemoryRecorder.ts";
 export * from "./protocol/types/MemoryScope.ts";
 export * from "./protocol/types/MemorySource.ts";
 export * from "./protocol/types/Message.ts";

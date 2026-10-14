@@ -13,6 +13,7 @@ class MemoryQuerySpec(TypedDict, total=False):
     kinds: list[_protocol.MemoryKind]  # optional
     limit: int  # optional
     provenance_agent: _protocol.AgentId | None  # optional
+    recorded_by: _protocol.MemoryRecorder | None  # optional
     scope: _protocol.MemoryScope | None  # optional
     tags: list[str]  # optional
     text: str | None  # optional

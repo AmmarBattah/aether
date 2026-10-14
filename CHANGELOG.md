@@ -16,6 +16,13 @@ release is also the text of its GitHub release.
   explicit repository name, or `root` for the workspace-derived id. Daemons
   advertise `operator_memory_roles` so clients can check support for the new
   scopes and the `repository` field.
+- **Memories can be listed by who recorded them.** The `memories` query
+  takes `recorded_by: "operator"` to list only what a person on this machine
+  filed, leaving out what agents remembered, repository notes and memories
+  read out of an import. `aether memory list --recorded-by operator` does the
+  same. Daemons advertise `memory_recorded_by`; an older daemon would ignore
+  the field and list everything, so clients check for it first and the CLI
+  refuses to ask one.
 
 ### Fixed
 

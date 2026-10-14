@@ -47,7 +47,7 @@ pub use aether_core::idempotency::UnprovenAbsence;
 use aether_core::inbox::InboxItem;
 use aether_core::lease::{Lease, ResourceHolding};
 use aether_core::mcp::McpServerHealth;
-use aether_core::memory::{MemoryKind, MemoryRecord, MemoryScope};
+use aether_core::memory::{MemoryKind, MemoryRecord, MemoryRecorder, MemoryScope};
 use aether_core::model::{CapabilityProfile, Effort, Message, ModelRef, Usage};
 use aether_core::provider::ProviderHealth;
 use aether_core::replay::ReplayFrame;
@@ -162,6 +162,9 @@ pub mod features {
     /// The daemon accepts role and repository-role operator memories,
     /// including explicit repository names on both repository scopes.
     pub const OPERATOR_MEMORY_ROLES: &str = "operator_memory_roles";
+    /// The daemon applies `MemoryQuerySpec.recorded_by`. A daemon without it
+    /// ignores the field and returns every memory, so check this first.
+    pub const MEMORY_RECORDED_BY: &str = "memory_recorded_by";
 }
 
 mod handshake;

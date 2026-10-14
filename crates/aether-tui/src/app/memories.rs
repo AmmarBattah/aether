@@ -5,6 +5,7 @@ impl App {
     pub(super) fn inspection_memory_query(provenance_agent: Option<AgentId>) -> MemoryQuerySpec {
         MemoryQuerySpec {
             provenance_agent,
+            recorded_by: None,
             scope: None,
             kinds: Vec::new(),
             tags: Vec::new(),

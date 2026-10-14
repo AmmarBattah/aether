@@ -4,7 +4,7 @@ use super::*;
 /// Message `agent`, let its turn take `responses` scripted responses, and
 /// return the memory ids its last turn was shown. One agent at a time: the
 /// script is shared, so overlapping turns would take each other's responses.
-async fn memories_shown_after(
+pub(super) async fn memories_shown_after(
     h: &Harness,
     agent: AgentId,
     message: &str,

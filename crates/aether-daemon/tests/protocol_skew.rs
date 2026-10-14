@@ -313,3 +313,70 @@ async fn operator_commands_round_trip_and_do_not_fabricate_authorship() {
     );
     daemon.stop().await;
 }
+
+/// Over the wire, `recorded_by` lists what a person filed and leaves out a
+/// memory merely visible beside it; a recorder the daemon does not know is
+/// refused rather than read as no filter.
+#[tokio::test]
+async fn memories_recorded_by_the_operator_are_listed_by_that_filter() {
+    let daemon = TestDaemon::start().await;
+    let mut conn = RawConn::connect(&daemon.socket).await.unwrap();
+    let welcome = conn.hello(PROTOCOL_VERSION).await.unwrap();
+    assert!(
+        welcome["features"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("memory_recorded_by")),
+        "{welcome}"
+    );
+    let created = conn.call(json!({"cmd":"create_agent", "role":"recorder-test", "start":false, "model":{"provider":"claude-code","model":"haiku"}})).await;
+    let id = created["result"]["Ok"]["data"]["id"].as_str().unwrap();
+    let taught = conn.call(json!({"cmd":"create_memory", "spec":{"scope":{"scope":"agent","id":id},"kind":"constraint","text":"Never push without a green local CI run."}})).await;
+    let taught = taught["result"]["Ok"]["data"]["id"].clone();
+    assert!(taught.is_string(), "{taught}");
+    // Synced on the operator's request, but the file states it, not the person.
+    let workspace = daemon.store_path().with_file_name("workspace");
+    let notes = workspace.join(".aether/knowledge");
+    std::fs::create_dir_all(&notes).unwrap();
+    std::fs::write(
+        notes.join("ci.md"),
+        "- **[constraint]** Merge only on green CI\n",
+    )
+    .unwrap();
+    let synced = conn.call(json!({"cmd":"sync_repository_knowledge"})).await;
+    assert!(synced["result"]["Ok"].is_object(), "{synced}");
+    let every = conn
+        .call(json!({"cmd":"memories", "query":{"kinds":["constraint"], "limit":10}}))
+        .await;
+    assert_eq!(
+        every["result"]["Ok"]["data"].as_array().unwrap().len(),
+        2,
+        "{every}"
+    );
+    let listed = conn
+        .call(json!({"cmd":"memories", "query":{"recorded_by":"operator", "kinds":["constraint"], "limit":10}}))
+        .await;
+    let listed = listed["result"]["Ok"]["data"].as_array().unwrap().clone();
+    assert_eq!(listed.len(), 1, "{listed:?}");
+    assert_eq!(listed[0]["id"], taught);
+    assert_eq!(listed[0]["provenance"]["actor"]["actor"], "user");
+    let other_kind = conn
+        .call(json!({"cmd":"memories", "query":{"recorded_by":"operator", "kinds":["lesson"]}}))
+        .await;
+    assert_eq!(
+        other_kind["result"]["Ok"]["data"],
+        json!([]),
+        "{other_kind}"
+    );
+    conn.send(&json!({"req":1001, "cmd":"memories", "query":{"recorded_by":"imported_operator"}}))
+        .await;
+    let refused = conn.await_reply(1001).await;
+    assert!(
+        refused["result"]["Err"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("unknown variant `imported_operator`"),
+        "{refused}"
+    );
+    daemon.stop().await;
+}

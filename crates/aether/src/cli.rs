@@ -8,7 +8,8 @@ pub(crate) mod voice;
 
 mod memory;
 pub use memory::{
-    memory_forget, memory_list, memory_pin, memory_restore, memory_show, memory_sync,
+    MemoryFilter, memory_forget, memory_list, memory_pin, memory_restore, memory_show, memory_sync,
+    parse_memory_recorder,
 };
 
 #[cfg(test)]

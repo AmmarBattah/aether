@@ -30,7 +30,7 @@ use aether_core::idempotency::{
 };
 use aether_core::inbox::InboxItem;
 use aether_core::lease::Lease;
-use aether_core::memory::{MemoryKind, MemoryRecord, MemoryScope};
+use aether_core::memory::{MemoryKind, MemoryRecord, MemoryRecorder, MemoryScope};
 use aether_core::model::{Message, ModelRef};
 use aether_core::schedule::{Schedule, ScheduleOccurrence};
 use aether_core::snapshot::{Invocation, InvocationSnapshot};
@@ -379,6 +379,8 @@ pub struct TaskFilter {
 pub struct MemoryQuery {
     /// Restrict authorship, independently of applicability scope.
     pub provenance_agent: Option<AgentId>,
+    /// Restrict to memories this kind of recorder authored.
+    pub recorded_by: Option<MemoryRecorder>,
     /// Memories visible to this scope: the exact scope plus global ones.
     pub scope: Option<MemoryScope>,
     /// Match `scope` exactly, without the global memories every scope sees.
@@ -409,6 +411,7 @@ impl Default for MemoryQuery {
         Self {
             scope: None,
             provenance_agent: None,
+            recorded_by: None,
             exact_scope: false,
             nested_scopes: false,
             kinds: Vec::new(),

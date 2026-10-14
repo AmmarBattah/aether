@@ -419,10 +419,21 @@ fn execute(args: Args, socket: PathBuf) -> anyhow::Result<i32> {
                     scope,
                     text,
                     tag,
+                    recorded_by,
                     all,
                     limit,
                     json,
-                } => cli::memory_list(endpoint, scope, text, tag, all, limit, json).await,
+                } => {
+                    let filter = cli::MemoryFilter {
+                        scope,
+                        text,
+                        tag,
+                        recorded_by,
+                        all,
+                        limit,
+                    };
+                    cli::memory_list(endpoint, filter, json).await
+                }
                 MemoryCmd::Show { id, json } => cli::memory_show(endpoint, id, json).await,
                 MemoryCmd::Forget { id, reason, json } => {
                     cli::memory_forget(endpoint, id, reason, json).await

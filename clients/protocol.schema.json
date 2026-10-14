@@ -8710,6 +8710,17 @@
           ],
           "description": "Who recorded the memory, not which agents may retrieve it."
         },
+        "recorded_by": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemoryRecorder"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Who recorded the memory, by kind: `operator` is a person on this\nmachine. A daemon without `features::MEMORY_RECORDED_BY` ignores it."
+        },
         "scope": {
           "anyOf": [
             {
@@ -8843,6 +8854,16 @@
         "created_at"
       ],
       "type": "object"
+    },
+    "MemoryRecorder": {
+      "description": "Who recorded a memory, as a query names it: read from the runtime-set\n`provenance.actor`, never from anything an author supplied.",
+      "oneOf": [
+        {
+          "const": "operator",
+          "description": "A person on this machine. An operator read out of an import acted on\nanother machine, so - as in the prompt's labels - it is not this one's.",
+          "type": "string"
+        }
+      ]
     },
     "MemoryScope": {
       "oneOf": [

@@ -69,6 +69,7 @@ async fn protocol_create_agent_keeps_a_lean_host_context_and_omits_full() {
         features.contains(&json!("operator_memory_roles")),
         "{welcome}"
     );
+    assert!(features.contains(&json!("memory_recorded_by")), "{welcome}");
     let created = oldest
         .call(json!({
             "cmd": "create_agent", "role": "root", "start": false,
@@ -86,6 +87,7 @@ async fn protocol_create_agent_keeps_a_lean_host_context_and_omits_full() {
         features.contains(&json!("operator_memory_roles")),
         "{welcome}"
     );
+    assert!(features.contains(&json!("memory_recorded_by")), "{welcome}");
     for (config, expected) in [
         (json!({"host_context": "lean"}), json!("lean")),
         (json!({"host_context": "full"}), Value::Null),

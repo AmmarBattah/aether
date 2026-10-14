@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::BTreeSet;
 
 #[test]
 fn memory_provenance_filter_precedes_limit_and_preserves_scope_and_status() {
@@ -189,7 +190,6 @@ fn memory_search_and_supersession() {
 /// of this one, and not one whose id and role split differently.
 #[test]
 fn a_repository_query_reaches_its_nested_role_scopes_only_when_asked() {
-    use std::collections::BTreeSet;
     let store = SqliteStore::open_in_memory().expect("open");
     let put = |text: &str, scope: MemoryScope| {
         let record = MemoryRecord::from_candidate(
@@ -367,4 +367,228 @@ fn memory_limits_preserve_zero_small_and_large_requests() {
             "limit {limit}"
         );
     }
+}
+
+/// One memory of each recorder the operator filter must tell apart.
+struct RecorderFixture {
+    store: SqliteStore,
+    repo: MemoryScope,
+    operator_global: MemoryId,
+    operator_repo: MemoryId,
+    operator_forgotten: MemoryId,
+    operator_superseded: MemoryId,
+}
+
+fn memory_by(scope: &MemoryScope, kind: MemoryKind, provenance: MemoryProvenance) -> MemoryRecord {
+    MemoryRecord::from_candidate(
+        MemoryCandidate {
+            scope: scope.clone(),
+            kind,
+            text: "commit with the resolved identity".into(),
+            structured: None,
+            importance: 0.5,
+            confidence: 0.7,
+            tags: vec![],
+            provenance,
+            supersedes: None,
+        },
+        now(),
+    )
+}
+
+fn actor(actor: Actor) -> MemoryProvenance {
+    MemoryProvenance {
+        actor: Some(actor),
+        ..Default::default()
+    }
+}
+
+/// Everything that is not this machine's operator: an import of one, an
+/// agent either way it can be recorded, the system, and a repository note.
+fn not_by_the_operator(repo: &MemoryScope) -> [MemoryRecord; 5] {
+    let agent = AgentId::new();
+    let note = aether_core::memory::MemorySource {
+        file: ".aether/knowledge/notes.md".into(),
+        commit: None,
+    };
+    [
+        memory_by(
+            repo,
+            MemoryKind::Constraint,
+            actor(Actor::user().imported()),
+        ),
+        memory_by(repo, MemoryKind::Constraint, actor(Actor::agent(agent))),
+        memory_by(repo, MemoryKind::Constraint, actor(Actor::System)),
+        memory_by(
+            repo,
+            MemoryKind::Constraint,
+            MemoryProvenance {
+                agent: Some(agent),
+                ..Default::default()
+            },
+        ),
+        memory_by(
+            repo,
+            MemoryKind::Constraint,
+            MemoryProvenance {
+                source: Some(note),
+                ..Default::default()
+            },
+        ),
+    ]
+}
+
+fn recorder_fixture() -> RecorderFixture {
+    let store = SqliteStore::open_in_memory().expect("open");
+    let repo = MemoryScope::Repository {
+        id: "aether".into(),
+    };
+    let named_operator = Actor::User {
+        name: Some("mengsig".into()),
+        origin: Some(aether_core::event::OperatorOrigin::LocalSocket {
+            connection: "c1".into(),
+        }),
+    };
+    let global = memory_by(
+        &MemoryScope::Global,
+        MemoryKind::Preference,
+        actor(Actor::user()),
+    );
+    let in_repo = memory_by(&repo, MemoryKind::Constraint, actor(named_operator));
+    let mut forgotten = memory_by(&repo, MemoryKind::Constraint, actor(Actor::user()));
+    forgotten.forgotten_at = Some(now());
+    let mut superseded = memory_by(&repo, MemoryKind::Constraint, actor(Actor::user()));
+    superseded.superseded_by = Some(MemoryId::new());
+    let fixture = RecorderFixture {
+        operator_global: global.id,
+        operator_repo: in_repo.id,
+        operator_forgotten: forgotten.id,
+        operator_superseded: superseded.id,
+        repo: repo.clone(),
+        store,
+    };
+    let commit = [global, in_repo, forgotten, superseded]
+        .into_iter()
+        .chain(not_by_the_operator(&repo))
+        .fold(Commit::new(), |c, r| c.mutate(Mutation::PutMemory(r)));
+    fixture.store.commit(commit).expect("commit");
+    fixture
+}
+
+fn recorded_ids(store: &SqliteStore, query: MemoryQuery) -> BTreeSet<MemoryId> {
+    store
+        .memories(&query)
+        .expect("memories")
+        .into_iter()
+        .map(|r| r.id)
+        .collect()
+}
+
+#[test]
+fn recorded_by_operator_matches_only_this_machines_operator() {
+    use aether_core::memory::MemoryRecorder;
+    let f = recorder_fixture();
+    let raw: Vec<String> = f
+        .store
+        .conn
+        .lock()
+        .prepare(
+            "SELECT json_extract(body, '$.provenance.actor.actor') FROM memories WHERE id = ?1",
+        )
+        .expect("prepare")
+        .query_map([f.operator_repo.to_string()], |row| row.get(0))
+        .expect("query")
+        .collect::<std::result::Result<_, _>>()
+        .expect("rows");
+    assert_eq!(raw, ["user"], "the stored actor tag the filter reads");
+    let operator = MemoryQuery {
+        recorded_by: Some(MemoryRecorder::Operator),
+        include_forgotten: true,
+        include_superseded: true,
+        limit: 100,
+        ..Default::default()
+    };
+    let everything = recorded_ids(
+        &f.store,
+        MemoryQuery {
+            recorded_by: None,
+            ..operator.clone()
+        },
+    );
+    assert_eq!(everything.len(), 9);
+    let all = BTreeSet::from([
+        f.operator_global,
+        f.operator_repo,
+        f.operator_forgotten,
+        f.operator_superseded,
+    ]);
+    assert_eq!(recorded_ids(&f.store, operator.clone()), all);
+    let current = MemoryQuery {
+        include_forgotten: false,
+        include_superseded: false,
+        ..operator.clone()
+    };
+    assert_eq!(
+        recorded_ids(&f.store, current.clone()),
+        BTreeSet::from([f.operator_global, f.operator_repo])
+    );
+    let in_repo = MemoryQuery {
+        scope: Some(f.repo.clone()),
+        exact_scope: true,
+        ..current.clone()
+    };
+    assert_eq!(
+        recorded_ids(&f.store, in_repo.clone()),
+        BTreeSet::from([f.operator_repo])
+    );
+    let constraints = MemoryQuery {
+        kinds: vec![MemoryKind::Constraint],
+        ..in_repo
+    };
+    assert_eq!(
+        recorded_ids(&f.store, constraints),
+        BTreeSet::from([f.operator_repo])
+    );
+    let visible = MemoryQuery {
+        scope: Some(f.repo.clone()),
+        kinds: vec![MemoryKind::Preference],
+        ..current
+    };
+    assert_eq!(
+        recorded_ids(&f.store, visible),
+        BTreeSet::from([f.operator_global])
+    );
+}
+
+/// The SQL clause and the Rust predicate name the same records.
+#[test]
+fn recorded_by_sql_agrees_with_the_predicate() {
+    use aether_core::memory::MemoryRecorder;
+    let f = recorder_fixture();
+    let every = f
+        .store
+        .memories(&MemoryQuery {
+            include_forgotten: true,
+            include_superseded: true,
+            limit: 100,
+            ..Default::default()
+        })
+        .expect("memories");
+    let predicate: BTreeSet<MemoryId> = every
+        .iter()
+        .filter(|r| MemoryRecorder::Operator.recorded(&r.provenance))
+        .map(|r| r.id)
+        .collect();
+    let sql = recorded_ids(
+        &f.store,
+        MemoryQuery {
+            recorded_by: Some(MemoryRecorder::Operator),
+            include_forgotten: true,
+            include_superseded: true,
+            limit: 100,
+            ..Default::default()
+        },
+    );
+    assert_eq!(sql, predicate);
+    assert_eq!(sql.len(), 4);
 }

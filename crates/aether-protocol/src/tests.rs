@@ -89,6 +89,31 @@ fn memory_provenance_filter_is_optional_and_roundtrips() {
     assert!(stored.scope.is_none());
 }
 
+#[test]
+fn memory_recorder_filter_is_optional_and_roundtrips() {
+    use aether_core::memory::MemoryRecorder;
+    let legacy: MemoryQuerySpec = serde_json::from_str("{}").unwrap();
+    assert_eq!(legacy.recorded_by, None);
+    assert!(
+        serde_json::to_value(&legacy)
+            .unwrap()
+            .get("recorded_by")
+            .is_none()
+    );
+    let wire =
+        serde_json::json!({"recorded_by": "operator", "include_forgotten": true, "limit": 50});
+    let query: MemoryQuerySpec = serde_json::from_value(wire.clone()).unwrap();
+    assert_eq!(query.recorded_by, Some(MemoryRecorder::Operator));
+    let echoed = serde_json::to_value(&query).unwrap();
+    assert_eq!(echoed["recorded_by"], "operator");
+    let stored: aether_store::MemoryQuery = query.into();
+    assert_eq!(stored.recorded_by, Some(MemoryRecorder::Operator));
+    assert!(stored.include_forgotten);
+    // A recorder this daemon does not know is refused, not read as no filter.
+    let unknown = serde_json::json!({"recorded_by": "imported_operator"});
+    assert!(serde_json::from_value::<MemoryQuerySpec>(unknown).is_err());
+}
+
 /// The commands a client can key, each with a key set.
 #[test]
 fn client_frame_flattens_command() {

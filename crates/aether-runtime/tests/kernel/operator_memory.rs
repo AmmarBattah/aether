@@ -866,3 +866,49 @@ async fn operator_repository_names_require_an_agent_and_exclude_roots() {
         }
     }
 }
+
+/// What the operator taught is told apart from what an agent remembered
+/// beside it, by the actor the runtime recorded rather than by scope.
+#[tokio::test]
+async fn recorded_by_operator_lists_what_the_operator_taught_and_not_what_agents_remembered() {
+    use aether_core::memory::{MemoryRecorder, OperatorMemoryScope};
+    let h = harness(vec![
+        ScriptedClient::tool_call(
+            "remember",
+            json!({"text": "The integration suite needs a warm cache", "kind": "lesson", "scope": "agent"}),
+        ),
+        ScriptedClient::text("Noted."),
+    ])
+    .await;
+    let (agent, _) = h
+        .runtime
+        .create_agent(long_lived("worker", None), Actor::user())
+        .expect("agent");
+    super::memory_scope::memories_shown_after(&h, agent.id, "remember the cache", 2).await;
+    let operator = Actor::connected_user(aether_core::event::OperatorOrigin::LocalSocket {
+        connection: "operator-connection".into(),
+    });
+    let taught = h
+        .runtime
+        .create_memory(operator_memory(OperatorMemoryScope::Global), operator)
+        .expect("operator memory");
+    let query = |recorded_by, provenance_agent| {
+        h.store
+            .memories(&aether_store::MemoryQuery {
+                recorded_by,
+                provenance_agent,
+                scope: Some(aether_core::memory::MemoryScope::Agent { id: agent.id }),
+                limit: 100,
+                ..Default::default()
+            })
+            .expect("memories")
+            .into_iter()
+            .map(|m| m.id)
+            .collect::<Vec<_>>()
+    };
+    let remembered = query(None, Some(agent.id));
+    assert_eq!(remembered.len(), 1, "the agent's own lesson was recorded");
+    assert_eq!(query(None, None).len(), 2, "both are visible to the agent");
+    assert_eq!(query(Some(MemoryRecorder::Operator), None), vec![taught.id]);
+    assert!(query(Some(MemoryRecorder::Operator), Some(agent.id)).is_empty());
+}

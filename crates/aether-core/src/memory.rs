@@ -126,6 +126,24 @@ pub struct MemoryProvenance {
     pub source: Option<MemorySource>,
 }
 
+/// Who recorded a memory, as a query names it: read from the runtime-set
+/// `provenance.actor`, never from anything an author supplied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryRecorder {
+    /// A person on this machine. An operator read out of an import acted on
+    /// another machine, so - as in the prompt's labels - it is not this one's.
+    Operator,
+}
+
+impl MemoryRecorder {
+    pub fn recorded(self, provenance: &MemoryProvenance) -> bool {
+        match self {
+            Self::Operator => matches!(provenance.actor, Some(crate::event::Actor::User { .. })),
+        }
+    }
+}
+
 /// Operator applicability, not authorship. Repository identity is resolved by the runtime.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "scope", rename_all = "snake_case", deny_unknown_fields)]
@@ -358,6 +376,42 @@ mod tests {
             let scope: OperatorMemoryScope = serde_json::from_value(wire.clone()).unwrap();
             assert_eq!(serde_json::to_value(&scope).unwrap(), wire);
             assert!(serde_json::to_value(scope).unwrap().get("root").is_none());
+        }
+    }
+
+    /// The store filters on the serialized actor's tag, so its shape is
+    /// pinned here beside the predicate it must agree with.
+    #[test]
+    fn only_a_local_operator_is_recorded_by_the_operator() {
+        use crate::event::Actor;
+        assert_eq!(
+            serde_json::to_value(MemoryRecorder::Operator).unwrap(),
+            json!("operator")
+        );
+        assert!(serde_json::from_value::<MemoryRecorder>(json!("agent")).is_err());
+        assert_eq!(
+            serde_json::to_value(Actor::user()).unwrap(),
+            json!({"actor": "user"})
+        );
+        assert_eq!(
+            serde_json::to_value(Actor::user().imported()).unwrap(),
+            json!({"actor": "imported", "was": {"actor": "user"}})
+        );
+        let cases = [
+            (Some(Actor::user()), None, true),
+            (Some(Actor::user().imported()), None, false),
+            (Some(Actor::agent(AgentId::new())), None, false),
+            (None, Some(AgentId::new()), false),
+            (Some(Actor::System), None, false),
+            (None, None, false),
+        ];
+        for (actor, agent, expected) in cases {
+            let provenance = MemoryProvenance {
+                actor,
+                agent,
+                ..Default::default()
+            };
+            assert_eq!(MemoryRecorder::Operator.recorded(&provenance), expected);
         }
     }
 

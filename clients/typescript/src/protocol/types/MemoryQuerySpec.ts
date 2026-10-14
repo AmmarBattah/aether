@@ -5,6 +5,7 @@ import type {
   AgentId,
   MemoryId,
   MemoryKind,
+  MemoryRecorder,
   MemoryScope,
 } from "../../protocol.ts";
 
@@ -15,6 +16,7 @@ export interface MemoryQuerySpec {
   "kinds"?: Array<MemoryKind>;
   "limit"?: number;
   "provenance_agent"?: AgentId | null;
+  "recorded_by"?: MemoryRecorder | null;
   "scope"?: MemoryScope | null;
   "tags"?: Array<string>;
   "text"?: string | null;

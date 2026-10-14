@@ -1,6 +1,6 @@
 use super::{SqliteStore, fts_query, nested_scope_range, scope_key};
 use crate::{MemoryQuery, Result};
-use aether_core::memory::MemoryRecord;
+use aether_core::memory::{MemoryRecord, MemoryRecorder};
 
 impl SqliteStore {
     pub(super) fn query_memories(&self, query: &MemoryQuery) -> Result<Vec<MemoryRecord>> {
@@ -39,6 +39,9 @@ impl SqliteStore {
                 " AND json_extract(m.body, '$.provenance.agent') = ?{}",
                 args.len()
             ));
+        }
+        if let Some(recorder) = query.recorded_by {
+            sql.push_str(recorded_by_clause(recorder));
         }
         if !query.include_superseded {
             sql.push_str(" AND m.superseded_by IS NULL");
@@ -87,6 +90,16 @@ impl SqliteStore {
         let conn = self.read_conn();
         let refs: Vec<&dyn rusqlite::ToSql> = args.iter().map(|a| a.as_ref()).collect();
         Self::read_many(&conn, &sql, &refs)
+    }
+}
+
+/// Must match [`MemoryRecorder::recorded`]. `Actor` serializes with its
+/// variant in an `actor` tag, so an imported operator's tag is `imported`.
+fn recorded_by_clause(recorder: MemoryRecorder) -> &'static str {
+    match recorder {
+        MemoryRecorder::Operator => {
+            " AND json_extract(m.body, '$.provenance.actor.actor') = 'user'"
+        }
     }
 }
 

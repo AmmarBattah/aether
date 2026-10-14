@@ -489,6 +489,11 @@ fn memory_lines_name_who_recorded_them_and_when() {
                 memory.id
             )
         );
+        // A query for what the operator recorded names the same memories.
+        assert_eq!(
+            aether_core::memory::MemoryRecorder::Operator.recorded(&memory.provenance),
+            origin == "operator"
+        );
         let initial = render::memory_line(&memory);
         memory.last_retrieved_at = Some(now());
         memory.retrieval_count += 1;

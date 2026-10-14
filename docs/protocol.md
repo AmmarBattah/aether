@@ -109,6 +109,12 @@ scopes. Check this feature before sending any of them. An older daemon rejects
 unknown scopes or fields with a decode error; it cannot file the memory under
 a different scope. The protocol version is unchanged.
 
+`memory_recorded_by` means the `memories` query applies `recorded_by` (see
+[memories by recorder](#memories-by-recorder)). A client must check it before
+sending the field: an older daemon ignores it and returns every memory the
+rest of the query matches, which would read as all of them having been filed
+by the operator. The Rust client refuses such a query itself.
+
 ## Operator memory scopes
 
 `create_memory` is operator-only. Its `spec.scope` describes which agents
@@ -139,6 +145,28 @@ by at least one agent, including terminal or archived agents. For example,
 rather than the workspace's derived id. When neither field is set, the daemon's
 workspace root is used. Unknown scope fields and invalid roles, roots or
 repository names are refused before a memory is written.
+
+## Memories by recorder
+
+The `memories` query takes `recorded_by` to list only what one kind of
+recorder authored, for example what the operator taught for a scope:
+
+```json
+{"cmd": "memories", "query": {"recorded_by": "operator",
+  "scope": {"scope": "repository", "id": "aether"}, "limit": 50}}
+```
+
+The only recorder is `operator`: a memory whose runtime-recorded
+`provenance.actor` is a person on this machine (`{"actor": "user", ...}`),
+which is what `create_memory` records. Memories an agent remembered, notes
+synced from a repository's files (even when an operator ran the sync) and
+system-recorded memories do not match. Neither does an operator memory read
+out of an import (`{"actor": "imported", "was": {"actor": "user"}}`): that
+person acted on another machine, and the prompt labels such a memory
+`imported`, not `operator`. The filter combines with every other field, so
+`scope`, `kinds`, `include_superseded` and `include_forgotten` narrow it as
+usual. An unknown recorder is refused with a decode error. Check the
+`memory_recorded_by` feature first.
 
 ## Narrowing a child's events
 

@@ -47,24 +47,41 @@ pub(super) fn parse_memory_scope(text: &str) -> anyhow::Result<aether_core::memo
     Ok(MemoryScope::Repository { id })
 }
 
-fn memory_query(
-    scope: Option<aether_core::memory::MemoryScope>,
-    text: Option<String>,
-    tag: Vec<String>,
-    all: bool,
-    limit: usize,
-) -> MemoryQuerySpec {
-    MemoryQuerySpec {
+/// What `memory list` narrows by.
+pub struct MemoryFilter {
+    pub scope: Option<String>,
+    pub text: Option<String>,
+    pub tag: Vec<String>,
+    pub recorded_by: Option<aether_core::memory::MemoryRecorder>,
+    /// Include superseded and forgotten memories.
+    pub all: bool,
+    pub limit: usize,
+}
+
+/// `operator`, named as the protocol names it so the two cannot drift.
+pub fn parse_memory_recorder(text: &str) -> anyhow::Result<aether_core::memory::MemoryRecorder> {
+    serde_json::from_value(serde_json::Value::String(text.trim().to_owned()))
+        .map_err(|_| anyhow::anyhow!("`{text}` is not a recorder; expected `operator`"))
+}
+
+fn memory_query(filter: MemoryFilter) -> anyhow::Result<MemoryQuerySpec> {
+    let scope = filter
+        .scope
+        .as_deref()
+        .map(parse_memory_scope)
+        .transpose()?;
+    Ok(MemoryQuerySpec {
         provenance_agent: None,
+        recorded_by: filter.recorded_by,
         scope,
         kinds: Vec::new(),
-        tags: tag,
-        text,
-        include_superseded: all,
-        include_forgotten: all,
+        tags: filter.tag,
+        text: filter.text,
+        include_superseded: filter.all,
+        include_forgotten: filter.all,
         id: None,
-        limit,
-    }
+        limit: filter.limit,
+    })
 }
 
 /// One word for where a memory stands, which is what a person scans for.
@@ -125,20 +142,18 @@ fn memory_origin(provenance: &aether_core::memory::MemoryProvenance) -> Vec<Stri
 
 pub async fn memory_list(
     socket: impl Into<aether_client::Endpoint>,
-    scope: Option<String>,
-    text: Option<String>,
-    tag: Vec<String>,
-    all: bool,
-    limit: usize,
+    filter: MemoryFilter,
     json: bool,
 ) -> anyhow::Result<()> {
     let socket = socket.into();
-    let scope = scope.as_deref().map(parse_memory_scope).transpose()?;
-    let unfiltered = scope.is_none() && text.is_none() && tag.is_empty();
+    let unfiltered = filter.scope.is_none()
+        && filter.text.is_none()
+        && filter.tag.is_empty()
+        && filter.recorded_by.is_none();
+    let all = filter.all;
+    let query = memory_query(filter)?;
     let client = connect(&socket).await?;
-    let memories = client
-        .memories(memory_query(scope, text, tag, all, limit))
-        .await?;
+    let memories = client.memories(query).await?;
     if json {
         println!("{}", serde_json::to_string(&memories)?);
         return Ok(());
@@ -184,7 +199,15 @@ pub async fn memory_show(
     let client = connect(&socket).await?;
     let id: aether_core::id::MemoryId = id.parse().context("invalid memory id")?;
     let one = |list: Vec<aether_core::memory::MemoryRecord>| list.into_iter().next();
-    let mut query = memory_query(None, None, Vec::new(), true, 1);
+    let everything = MemoryFilter {
+        scope: None,
+        text: None,
+        tag: Vec::new(),
+        recorded_by: None,
+        all: true,
+        limit: 1,
+    };
+    let mut query = memory_query(everything)?;
     query.id = Some(id);
     let record =
         one(client.memories(query).await?).ok_or_else(|| anyhow::anyhow!("no memory {id}"))?;

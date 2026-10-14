@@ -1,8 +1,8 @@
 use super::{
     AgentConfig, AgentId, AgentStatusKind, ApprovalDecision, ApprovalPolicy, DeadlineUpdate,
-    Deserialize, Effort, ExecutionBackend, MemoryId, MemoryKind, MemoryScope, ModelRef,
-    NetworkPolicy, Priority, RuleMatch, RuleScope, RunId, Scope, Serialize, TaskId, TaskStatusKind,
-    ToolExposure,
+    Deserialize, Effort, ExecutionBackend, MemoryId, MemoryKind, MemoryRecorder, MemoryScope,
+    ModelRef, NetworkPolicy, Priority, RuleMatch, RuleScope, RunId, Scope, Serialize, TaskId,
+    TaskStatusKind, ToolExposure,
 };
 
 /// Request to create an agent, optionally with an initial task.
@@ -223,6 +223,10 @@ pub struct MemoryQuerySpec {
     /// Who recorded the memory, not which agents may retrieve it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provenance_agent: Option<AgentId>,
+    /// Who recorded the memory, by kind: `operator` is a person on this
+    /// machine. A daemon without `features::MEMORY_RECORDED_BY` ignores it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recorded_by: Option<MemoryRecorder>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope: Option<MemoryScope>,
     #[serde(default)]
@@ -252,6 +256,7 @@ impl From<MemoryQuerySpec> for aether_store::MemoryQuery {
         Self {
             scope: q.scope,
             provenance_agent: q.provenance_agent,
+            recorded_by: q.recorded_by,
             // A browser asks what an agent in the scope can see, which
             // includes the global memories every scope sees.
             exact_scope: false,

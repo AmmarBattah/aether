@@ -70,6 +70,7 @@ struct Stub {
     hostile_saved_model: bool,
     reject_models: bool,
     invalid_models: bool,
+    features: Vec<String>,
 }
 impl Default for Stub {
     fn default() -> Self {
@@ -85,6 +86,7 @@ impl Default for Stub {
             hostile_saved_model: false,
             reject_models: false,
             invalid_models: false,
+            features: Vec::new(),
         }
     }
 }
@@ -167,7 +169,7 @@ async fn cli_with_socket(
                     instance_id: "stub".into(),
                     schema_version: 1,
                     pid: std::process::id(),
-                    features: vec![],
+                    features: stub.features.clone(),
                     daemon_protocol_version: None,
                     min_protocol_version: None,
                     idle_timeout_secs: None,
@@ -412,7 +414,10 @@ async fn cli_with_socket(
                     if stub.forgotten {
                         m.forgotten_at = Some(AT.parse().unwrap());
                     }
-                    let matches = query.text.as_ref().is_none_or(|t| m.text.contains(t));
+                    let matches = query.text.as_ref().is_none_or(|t| m.text.contains(t))
+                        && query
+                            .recorded_by
+                            .is_none_or(|recorder| recorder.recorded(&m.provenance));
                     Ok(Reply::Memories(
                         if matches && (!stub.forgotten || query.include_forgotten) {
                             vec![m]
@@ -917,6 +922,55 @@ async fn memory_empty_results_describe_filters_instead_of_claiming_no_history() 
             stdout(&out)
         );
     }
+}
+
+/// The filter reaches the daemon, and a daemon that would ignore it is
+/// refused rather than trusted to have applied it.
+#[tokio::test]
+async fn memory_list_by_recorder_needs_a_daemon_that_filters() {
+    let args = ["memory", "list", "--recorded-by", "operator"];
+    let old = cli(&args, Stub::default()).await;
+    assert_eq!(old.status.code(), Some(1));
+    assert!(
+        stderr(&old).contains("cannot filter memories by recorder"),
+        "{}",
+        stderr(&old)
+    );
+    let filtering = || Stub {
+        features: vec![aether_protocol::features::MEMORY_RECORDED_BY.into()],
+        ..Default::default()
+    };
+    let by_agent = cli(&args, filtering()).await;
+    assert!(by_agent.status.success(), "{}", stderr(&by_agent));
+    assert!(stdout(&by_agent).contains("no memories match"));
+    assert!(!stdout(&by_agent).contains("`remember`"));
+    let by_operator = cli(
+        &args,
+        Stub {
+            memory_provenance: Some(aether_core::memory::MemoryProvenance {
+                actor: Some(aether_core::event::Actor::user()),
+                ..Default::default()
+            }),
+            ..filtering()
+        },
+    )
+    .await;
+    assert!(by_operator.status.success(), "{}", stderr(&by_operator));
+    assert!(
+        stdout(&by_operator).contains(MEMORY),
+        "{}",
+        stdout(&by_operator)
+    );
+    let root = tempfile::tempdir().unwrap();
+    let unknown = isolated_command(root.path(), &["memory", "list", "--recorded-by", "agent"])
+        .output()
+        .unwrap();
+    assert_eq!(unknown.status.code(), Some(2));
+    assert!(
+        stderr(&unknown).contains("expected `operator`"),
+        "{}",
+        stderr(&unknown)
+    );
 }
 
 #[tokio::test]
