@@ -248,6 +248,8 @@ mod images;
 
 mod streaming;
 
+mod streaming_failure;
+
 mod backfill;
 
 mod parent_history;

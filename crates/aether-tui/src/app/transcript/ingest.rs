@@ -585,6 +585,16 @@ fn text_of(content: &[ContentBlock]) -> String {
         .join("")
 }
 
+fn thinking_of(content: &[ContentBlock]) -> String {
+    content
+        .iter()
+        .filter_map(|b| match b {
+            ContentBlock::Thinking { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
 /// A delivered message as its cell reads: the text, then a line per image.
 fn message_text(content: &[ContentBlock]) -> String {
     let labels = content.iter().filter_map(|block| match block {
@@ -1166,13 +1176,7 @@ fn own_event(t: &mut AgentTranscript, agent: AgentId, event: &Event, look: &Look
             content,
             invocation,
         } => {
-            let thinking: String = content
-                .iter()
-                .filter_map(|b| match b {
-                    ContentBlock::Thinking { text, .. } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect();
+            let thinking = thinking_of(content);
             let since = if *invocation == t.stream.invocation {
                 let since = t.stream.reasoning_since;
                 t.stream.reset();
@@ -1321,9 +1325,10 @@ fn own_event(t: &mut AgentTranscript, agent: AgentId, event: &Event, look: &Look
             if *retryable && t.private.quota.is_none() {
                 return;
             }
+            let thinking = thinking_of(partial);
             let partial = text_of(partial);
             let matching = t.stream.invocation == Some(*invocation);
-            if partial.trim().is_empty() {
+            if partial.trim().is_empty() && thinking.trim().is_empty() {
                 if matching {
                     t.commit_stream(at);
                 }
@@ -1331,7 +1336,7 @@ fn own_event(t: &mut AgentTranscript, agent: AgentId, event: &Event, look: &Look
                 if matching {
                     t.stream.reset();
                 }
-                t.push_reply(at, "", &partial, None);
+                t.push_reply(at, &thinking, &partial, None);
             }
             let hint = match t.private.quota {
                 Some(_) => NoticeText::joined(&["/model to switch", "/wake"], NoticeSeparator::Dot),
