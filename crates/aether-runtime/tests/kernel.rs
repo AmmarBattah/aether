@@ -211,6 +211,10 @@ mod questions;
 mod recovery_limits;
 #[path = "kernel/recovery_support.rs"]
 mod recovery_support;
+#[path = "kernel/repository_alias.rs"]
+mod repository_alias;
+#[path = "kernel/repository_alias_races.rs"]
+mod repository_alias_races;
 #[path = "kernel/repository_memory.rs"]
 mod repository_memory;
 #[path = "kernel/repository_root.rs"]

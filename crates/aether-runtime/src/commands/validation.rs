@@ -191,7 +191,8 @@ impl Runtime {
         let Some(parent) = parent else {
             return Ok(requested.unwrap_or_else(|| self.default_root_scope()));
         };
-        let scope = requested.unwrap_or_else(|| parent.scope.clone());
+        let parent_scope = self.resolved_scope(&parent.scope)?;
+        let scope = requested.unwrap_or_else(|| parent_scope.clone());
         let checked = if let Some(workspace) = isolated_workspace {
             if scope.workspace_root.as_deref() != Some(workspace) {
                 return Err(RuntimeError::Invalid(
@@ -216,9 +217,9 @@ impl Runtime {
             scope.clone()
         };
         let parent_scope = if isolated_workspace.is_some() {
-            Self::canonical_workspace_scope(&parent.scope)?
+            Self::canonical_workspace_scope(&parent_scope)?
         } else {
-            parent.scope.clone()
+            parent_scope
         };
         match checked.widened_field(&parent_scope) {
             Some(field) => Err(RuntimeError::Invalid(format!(
@@ -332,7 +333,19 @@ impl Runtime {
         } else {
             parent.scope.clone()
         };
-        Ok(logical.widened_field(&parent_scope))
+        self.widened_field_resolved(&logical, &parent_scope)
+    }
+
+    /// The field on which `scope` widens `parent`, both repositories resolved:
+    /// an agent created before an alias still names the old id.
+    pub(crate) fn widened_field_resolved(
+        &self,
+        scope: &Scope,
+        parent: &Scope,
+    ) -> Result<Option<&'static str>> {
+        Ok(self
+            .resolved_scope(scope)?
+            .widened_field(&self.resolved_scope(parent)?))
     }
 
     /// Project a descendant's physical workspace through every managed
@@ -375,14 +388,19 @@ impl Runtime {
                 } else {
                     ancestor_scope.clone()
                 };
-                return Ok(scope.widened_field(&comparison).is_none());
+                return Ok(self.widened_field_resolved(&scope, &comparison)?.is_none());
             }
-            if scope.widened_field(&parent_scope).is_some() {
+            if self
+                .widened_field_resolved(&scope, &parent_scope)?
+                .is_some()
+            {
                 return Ok(false);
             }
             current = parent;
         }
-        Ok(scope.widened_field(ancestor_scope).is_none())
+        Ok(self
+            .widened_field_resolved(&scope, ancestor_scope)?
+            .is_none())
     }
 
     /// Why this run may start no more work, if it may not: it has spent its

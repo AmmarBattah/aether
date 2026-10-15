@@ -66,6 +66,9 @@ pub enum Hook {
     /// check and before its request would be committed.
     TaskBoundaryTranscriptRead,
     MemoryRetrievalRead,
+    /// A repository id resolved through the aliases, fired after the
+    /// resolution returns: an alias landing here makes that answer stale.
+    RepositoryResolved,
 }
 
 /// A write a concurrent actor makes, run against the underlying store.
@@ -82,6 +85,7 @@ pub struct CommitsMidPass {
     fail_next_read: std::sync::atomic::AtomicBool,
     read_failed: std::sync::atomic::AtomicBool,
     dependency_owner_read: std::sync::atomic::AtomicBool,
+    skip: std::sync::atomic::AtomicUsize,
 }
 
 impl CommitsMidPass {
@@ -93,7 +97,14 @@ impl CommitsMidPass {
             fail_next_read: std::sync::atomic::AtomicBool::new(false),
             read_failed: std::sync::atomic::AtomicBool::new(false),
             dependency_owner_read: std::sync::atomic::AtomicBool::new(false),
+            skip: std::sync::atomic::AtomicUsize::new(0),
         }
+    }
+
+    /// Arm `write` for the hook's `skip + 1`th moment, not its next one.
+    pub fn arm_skipping(&self, skip: usize, write: Armed) {
+        self.skip.store(skip, std::sync::atomic::Ordering::SeqCst);
+        self.arm(write);
     }
 
     pub fn arm(&self, write: Armed) {
@@ -112,6 +123,14 @@ impl CommitsMidPass {
 
     fn fire(&self, hook: Hook) -> Result<()> {
         if hook != self.hook {
+            return Ok(());
+        }
+        let skipped = self.skip.fetch_update(
+            std::sync::atomic::Ordering::SeqCst,
+            std::sync::atomic::Ordering::SeqCst,
+            |n| n.checked_sub(1),
+        );
+        if skipped.is_ok() {
             return Ok(());
         }
         let write = self.armed.lock().expect("armed").take();
@@ -160,6 +179,28 @@ impl Store for CommitsMidPass {
 
     fn any_agent_in_repository(&self, repository: &str) -> Result<bool> {
         self.inner.any_agent_in_repository(repository)
+    }
+    fn resolve_repository(&self, repository: &str) -> Result<String> {
+        let resolved = self.inner.resolve_repository(repository)?;
+        self.fire(Hook::RepositoryResolved)?;
+        Ok(resolved)
+    }
+    fn repository_aliases(&self) -> Result<Vec<aether_core::repository::RepositoryAlias>> {
+        self.inner.repository_aliases()
+    }
+    fn preview_repository_alias(
+        &self,
+        alias: &aether_core::repository::RepositoryAlias,
+    ) -> Result<aether_store::RepositoryAliasMove> {
+        self.inner.preview_repository_alias(alias)
+    }
+    fn alias_repository(
+        &self,
+        alias: &aether_core::repository::RepositoryAlias,
+        by: aether_core::event::Actor,
+        hold: &aether_store::Hold<'_>,
+    ) -> Result<aether_store::RepositoryAliasMove> {
+        self.inner.alias_repository(alias, by, hold)
     }
     fn agents(&self, filter: &AgentFilter) -> Result<Vec<Agent>> {
         if self.hook == Hook::CancelDescendantRead

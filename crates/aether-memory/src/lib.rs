@@ -187,6 +187,10 @@ impl MemoryService {
         task: Option<TaskId>,
         superseded: &BTreeSet<MemoryId>,
     ) -> Result<(Admission, Commit)> {
+        let candidate = MemoryCandidate {
+            scope: self.canonical_scope(candidate.scope)?,
+            ..candidate
+        };
         let at = now();
         let mut commit = Commit::new();
         let base = |kind: EventKind| {
@@ -268,6 +272,48 @@ impl MemoryService {
             }
             None => Ok((Admission::Accepted { record }, commit)),
         }
+    }
+
+    /// `scope` with its repository resolved through the registered aliases,
+    /// so whoever still names an old repository reads and writes the scope its
+    /// memories were moved to. Every other scope comes back as it went in.
+    pub fn canonical_scope(&self, scope: MemoryScope) -> Result<MemoryScope> {
+        let resolved = match scope {
+            MemoryScope::Repository { id } => MemoryScope::Repository {
+                id: self.store.resolve_repository(&id)?,
+            },
+            MemoryScope::RepositoryRole { id, role } => MemoryScope::RepositoryRole {
+                id: self.store.resolve_repository(&id)?,
+                role,
+            },
+            other => other,
+        };
+        Ok(resolved)
+    }
+
+    /// `read` against `scope` resolved through the aliases, outside any hold.
+    /// An alias committing mid-read changes the resolution, so the read is
+    /// repeated once against the new target; aliases are permanent and never
+    /// chain, so a name's resolution changes at most once.
+    pub fn read_resolved<T>(
+        &self,
+        scope: Option<MemoryScope>,
+        read: impl Fn(Option<MemoryScope>) -> Result<T>,
+    ) -> Result<T> {
+        let resolve =
+            |scope: Option<MemoryScope>| scope.map(|s| self.canonical_scope(s)).transpose();
+        let first = resolve(scope.clone())?;
+        let found = read(first.clone())?;
+        let again = resolve(scope)?;
+        if again == first {
+            return Ok(found);
+        }
+        debug_assert_eq!(
+            resolve(again.clone())?,
+            again,
+            "an alias resolved to an alias"
+        );
+        read(again)
     }
 
     /// Evaluate operator content under the caller's hold. Rejections have no commit.
