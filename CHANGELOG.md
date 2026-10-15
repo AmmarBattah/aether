@@ -4,6 +4,17 @@ What each release of Aether brings, newest first. Aether follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The section of a
 release is also the text of its GitHub release.
 
+## Unreleased
+
+### Fixed
+
+- **What a Claude Code or Codex turn streamed before it failed stays on the
+  record.** The terminal showed the partial answer and reasoning live, but a
+  reload showed nothing: the failure was stored under a new id with no
+  content. The failure record now keeps the uncommitted reasoning and text
+  under the id they streamed under, so both views show them once. Nothing is
+  billed for it, and it is never sent back to the model.
+
 ## 1.0.6
 
 Operators can teach a role, list what they taught, and give one repository
