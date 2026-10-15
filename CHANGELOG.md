@@ -4,25 +4,31 @@ What each release of Aether brings, newest first. Aether follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The section of a
 release is also the text of its GitHub release.
 
-## Unreleased
+## 1.0.6
+
+Operators can teach a role, list what they taught, and give one repository
+a single memory however its agents name it. Incomplete costs now say why,
+and several totals that wrongly read complete are now marked as floors.
 
 ### New
 
 - **Operators can file memories by role.** The `role` scope reaches agents
   with that exact role across repositories. The `repository_role` scope
   reaches one role family in a repository, including dotted subroles such
-  as `reviewer.security` and Archon roles such as `archon-stage:default/review`.
+  as `reviewer.security` and Archon roles such as
+  `archon-stage:default/review`.
   Both repository scopes accept `repository` to target an existing agent's
   explicit repository name, or `root` for the workspace-derived id. Daemons
   advertise `operator_memory_roles` so clients can check support for the new
   scopes and the `repository` field.
 - **Memories can be listed by who recorded them.** The `memories` query
   takes `recorded_by: "operator"` to list only what an operator of this
-  daemon filed, locally or remotely, leaving out what agents remembered, repository notes and memories
-  read out of an import. `aether memory list --recorded-by operator` does the
-  same. Daemons advertise `memory_recorded_by`; an older daemon would ignore
-  the field and list everything, so clients check for it first and the CLI
-  refuses to ask one.
+  daemon filed, locally or remotely, leaving out what agents remembered,
+  repository notes and memories read out of an import.
+  `aether memory list --recorded-by operator` does the same. Daemons
+  advertise `memory_recorded_by`; an older daemon would ignore the field and
+  list everything, so clients check for it first and the CLI refuses to ask
+  one.
 - **A client can name the checkout an agent's memory belongs to.**
   `create_agent` takes `repository_root`, an absolute path the daemon derives
   the repository id from, exactly as for an agent working there, so agents in
@@ -65,6 +71,10 @@ release is also the text of its GitHub release.
   only the child events the parent's transcript shows, and the same parent
   opens on all 300. An older daemon ignores the narrower request and pages as
   before.
+- **A failed answer's reasoning survives a reload.** When an API response
+  failed partway, the terminal showed its partial reasoning live but lost it
+  after a reload, and lost it in both views when the answer had begun too.
+  The stored reasoning now shows beside the partial answer in both.
 
 ## 1.0.5
 
