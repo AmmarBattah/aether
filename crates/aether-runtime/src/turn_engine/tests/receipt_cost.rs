@@ -267,6 +267,7 @@ fn resumed_parser(prior: Usage) -> ParseState {
         bypass_permissions: false,
         hidden_env: Vec::new(),
         tool_hidden_env: Vec::new(),
+        temp_dir: None,
         mcp: None,
     })
 }

@@ -302,3 +302,53 @@ retention remain possible sources of growth; this policy is not a hard disk
 quota. Logs whose owner history expired before final-state evidence was recorded
 are retained. SQLite reuses expired history pages rather than necessarily
 shrinking its file.
+
+## Agent temp dirs
+
+Each agent gets a private temp directory, exported as `TMPDIR`, `TMP` and
+`TEMP` to the processes it starts: its engine CLI, and the commands and
+background jobs it runs on the host.
+
+```toml
+[agents]
+# temp_root = "/var/tmp/aether"
+```
+
+`temp_root` must be an absolute path. `~` and environment variables are not
+expanded. When unset, the root is `t` in the data directory, beside
+`aether.db`. Aether never picks `/tmp` as the root.
+
+The daemon resolves the root to its real path once at startup, following any
+symlinks in it, and uses only that path from then on: it is what agents get as
+`TMPDIR` and what `aether doctor` and `aether storage` report. The daemon
+creates the root with mode 0700. It refuses a root that belongs to another
+user, that is writable by group or others, or that its owner cannot read, write
+and search. It also refuses a root with a parent directory on its real path
+that belongs to a user other than you or root, or that others can write without
+the sticky bit. A `.aether-instance` file in the root records the instance that
+owns it. A root claimed by another instance is refused, so give each daemon its
+own `temp_root`. Before each agent process starts, the daemon checks the root
+and its claim again. It checks the parent directories only at startup and when
+it has to create the root again, so keep their ownership and permissions as
+they are. At startup the daemon also removes staging files named
+`.aether-instance.<id>` that an interrupted claim left in the root.
+
+A configured `temp_root` that fails these checks stops the daemon from
+starting. The default root does not: if it cannot be created or fails a check,
+the daemon logs a warning, `aether doctor` reports it, and agents keep the
+daemon's own temp directory, as they did before agent temp dirs existed.
+
+Each agent's directory is named after the last 12 characters of its id (for
+example `<root>/4K9Z2M7QX1AB`). It is created with mode 0700 just before the
+agent's first process starts, and created again if it was deleted. If an
+existing directory is a symlink, belongs to another user, or has any mode
+other than 0700, the agent's turn or command fails until it is removed.
+
+Startup and `aether doctor` warn when the root is on tmpfs or ramfs, and when
+the root's real path plus 13 bytes exceeds 50 bytes, which leaves tools too little room
+for Unix socket paths. On macOS the default root,
+`~/Library/Application Support/aether/t`, plus an agent's directory is about
+62 bytes, so this warning always appears there. Set `temp_root` to a short,
+absolute directory that only you can write, such as `/Users/<you>/.aether-t`. `aether storage` reports the total bytes and the number
+of agent directories under `agent_temp`. Nothing is cleaned up automatically
+yet.

@@ -793,3 +793,116 @@ fn unsafe_credential_directory_warns_with_exact_repair() {
         0o775
     );
 }
+
+#[test]
+fn the_agent_temp_root_is_judged_where_the_daemon_will_put_it() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = tempfile::tempdir().unwrap();
+    let paths = paths(&std::fs::canonicalize(dir.path()).unwrap());
+    let check = check_agent_temp(&paths, None, None);
+    // Warns, rather than passes, when the test's temp dir is held in memory.
+    assert_ne!(check.level, Level::Fail, "{check:?}");
+    assert!(
+        check
+            .detail
+            .contains(&paths.data_dir.join("t").display().to_string())
+    );
+    assert!(!paths.data_dir.join("t").exists(), "doctor creates nothing");
+
+    let shared = dir.path().join("shared");
+    std::fs::create_dir(&shared).unwrap();
+    std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o777)).unwrap();
+    let check = check_agent_temp(&paths, Some(&shared), None);
+    assert_eq!(check.level, Level::Fail, "{check:?}");
+    assert!(
+        check.detail.contains("writable by group or others"),
+        "{check:?}"
+    );
+
+    let long = Path::new("/var/tmp").join("x".repeat(40));
+    let check = check_agent_temp(&paths, Some(&long), None);
+    assert_eq!(check.level, Level::Warn, "{check:?}");
+    assert!(check.detail.contains("budget"), "{check:?}");
+}
+
+#[test]
+fn a_relative_data_dir_is_resolved_as_the_daemon_resolves_it() {
+    let paths = Paths {
+        data_dir: PathBuf::from("doctor-relative-data"),
+        ..paths(Path::new("/nonexistent"))
+    };
+    let check = check_agent_temp(&paths, None, None);
+    assert_ne!(check.level, Level::Fail, "{check:?}");
+    let expected = std::env::current_dir()
+        .unwrap()
+        .join("doctor-relative-data/t");
+    assert!(
+        check.detail.contains(&expected.display().to_string()),
+        "{check:?}"
+    );
+    assert!(
+        !Path::new("doctor-relative-data").exists(),
+        "doctor creates nothing"
+    );
+}
+
+#[test]
+fn an_unusable_default_root_warns_and_an_unusable_configured_one_fails() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = tempfile::tempdir().unwrap();
+    let paths = paths(dir.path());
+    let root = paths.data_dir.join("t");
+    aether_core::agent_temp::prepare_root(&root, "instance-b").unwrap();
+    let check = check_agent_temp(&paths, None, Some("instance-a"));
+    assert_eq!(check.level, Level::Warn, "{check:?}");
+    assert!(
+        check.detail.contains("another Aether instance"),
+        "{check:?}"
+    );
+    assert!(check.detail.contains("daemon's temp dir"), "{check:?}");
+    let check = check_agent_temp(&paths, Some(&root), Some("instance-a"));
+    assert_eq!(check.level, Level::Fail, "{check:?}");
+
+    std::fs::remove_dir_all(&root).unwrap();
+    std::fs::set_permissions(&paths.data_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let check = check_agent_temp(&paths, None, None);
+    let writable = rustix::fs::access(&paths.data_dir, rustix::fs::Access::WRITE_OK).is_ok();
+    std::fs::set_permissions(&paths.data_dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    // A superuser writes there regardless, and then the root could be made.
+    if !writable {
+        assert_eq!(check.level, Level::Warn, "{check:?}");
+        assert!(check.detail.contains("cannot create"), "{check:?}");
+    }
+}
+
+#[test]
+fn the_agent_temp_root_is_judged_at_its_real_path() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let paths = paths(&base);
+    let (shared, private) = (base.join("shared"), base.join("private"));
+    std::fs::create_dir(&shared).unwrap();
+    std::fs::create_dir(&private).unwrap();
+    std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o777)).unwrap();
+    std::os::unix::fs::symlink(&private, shared.join("middle")).unwrap();
+    std::os::unix::fs::symlink(shared.join("middle"), base.join("alias")).unwrap();
+    let check = check_agent_temp(&paths, Some(&base.join("alias/t")), None);
+    assert_ne!(check.level, Level::Fail, "{check:?}");
+    assert!(
+        check
+            .detail
+            .contains(&private.join("t").display().to_string()),
+        "{check:?}"
+    );
+
+    let root = paths.data_dir.join("t");
+    aether_core::agent_temp::prepare_root(&root, "instance-a").unwrap();
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let default = check_agent_temp(&paths, None, Some("instance-a"));
+    let configured = check_agent_temp(&paths, Some(&root), Some("instance-a"));
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(default.level, Level::Warn, "{default:?}");
+    assert!(default.detail.contains("its owner"), "{default:?}");
+    assert_eq!(configured.level, Level::Fail, "{configured:?}");
+}

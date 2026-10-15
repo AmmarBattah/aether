@@ -6,6 +6,21 @@ release is also the text of its GitHub release.
 
 ## Unreleased
 
+### New
+
+- **Each agent gets its own temp directory.** The processes an agent starts,
+  meaning its Claude Code or Codex CLI and the host commands, background jobs
+  and terminals it runs, get `TMPDIR`, `TMP` and `TEMP` pointing at a private
+  0700 directory. That directory sits under `[agents] temp_root`, which
+  defaults to `t` in the data directory. The root is resolved to its real
+  path at startup. The daemon refuses to start on a configured root that is
+  not private to the user or rwx for its owner, sits under a parent others can
+  change, or that another instance has claimed. If the default root can't
+  be used, it warns and agents keep the daemon's temp directory. Startup and
+  `aether doctor` warn when the root is on tmpfs or too long for socket paths.
+  `aether storage` reports their size under `agent_temp`. Nothing is deleted
+  yet.
+
 ### Fixed
 
 - **Unusable Claude Code receipts keep a cost floor when spend is observed.**
