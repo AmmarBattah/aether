@@ -59,7 +59,7 @@ fn event_has_activity(event: &EngineEvent, ctx: &TurnCtx) -> bool {
         | EngineEvent::Note(_)
         | EngineEvent::ProtocolNote(_)
         | EngineEvent::Done(_) => false,
-        EngineEvent::SessionUsage { session, total } => {
+        EngineEvent::SessionUsage { session, total, .. } => {
             let mut baseline = ctx
                 .agent
                 .engine_usage
@@ -872,10 +872,13 @@ fn merge_cleanup_receipt(outcome: &mut EngineOutcome, receipt: EngineOutcome) {
         (Some(before), Some(after)) => Some(before.max(after)),
         (before, after) => before.or(after),
     };
-    outcome.cost_usd = match (outcome.cost_usd, receipt.cost_usd) {
-        (Some(before), Some(after)) => Some(before.max(after)),
-        (before, after) => before.or(after),
-    };
+    if receipt
+        .cost_usd
+        .is_some_and(|cost| outcome.cost_usd.is_none_or(|before| cost >= before))
+    {
+        outcome.cost_usd = receipt.cost_usd;
+        outcome.cost_usage = receipt.cost_usage;
+    }
     let class = crate::exhaustion::engine_error_class(receipt.error.as_deref().unwrap_or(""));
     if crate::exhaustion::recoverable_by_fallback(class) {
         outcome.error = receipt.error;
@@ -928,6 +931,38 @@ fn interruption_cause(
 #[cfg(test)]
 mod receipt_tests {
     use super::*;
+
+    #[test]
+    fn cleanup_keeps_cost_counters_paired_with_the_selected_dollar_receipt() {
+        let mut outcome = EngineOutcome {
+            cost_usd: Some(1.0),
+            ..EngineOutcome::default()
+        };
+        let covered = Usage {
+            input_tokens: 200,
+            ..Usage::default()
+        };
+        merge_cleanup_receipt(
+            &mut outcome,
+            EngineOutcome {
+                cost_usd: Some(2.0),
+                cost_usage: Some(Box::new(covered)),
+                ..EngineOutcome::default()
+            },
+        );
+        assert_eq!(outcome.cost_usd, Some(2.0));
+        assert_eq!(outcome.cost_usage.as_deref(), Some(&covered));
+        merge_cleanup_receipt(
+            &mut outcome,
+            EngineOutcome {
+                cost_usd: Some(1.0),
+                cost_usage: Some(Box::default()),
+                ..EngineOutcome::default()
+            },
+        );
+        assert_eq!(outcome.cost_usd, Some(2.0));
+        assert_eq!(outcome.cost_usage.as_deref(), Some(&covered));
+    }
 
     #[test]
     fn synthetic_done_cannot_establish_or_replace_closing_accounting() {
