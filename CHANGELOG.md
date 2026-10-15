@@ -4,7 +4,14 @@ What each release of Aether brings, newest first. Aether follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The section of a
 release is also the text of its GitHub release.
 
-## Unreleased
+## 1.0.10
+
+Each agent now gets its own private temp directory instead of sharing the
+system's, and startup and `aether doctor` warn when that directory is on
+tmpfs or its path is too long for sockets. Cost figures are more accurate: a
+Claude Code request the API refuses costs a complete $0 instead of an
+unknown amount, and a Claude Code receipt that can't be used leaves the cost
+marked incomplete when the agent was seen spending.
 
 ### New
 
