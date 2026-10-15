@@ -356,6 +356,14 @@ pub enum Command {
     },
     /// Registered repository aliases. Needs `repository_aliases`.
     ListRepositoryAliases,
+    /// Which stored memories every model call of a task, or one invocation,
+    /// was given. Name exactly one. Needs `memory_context`.
+    MemoriesInContext {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        task: Option<TaskId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        invocation: Option<InvocationId>,
+    },
 
     /// Runs this store knows about, newest first.
     ListRuns {

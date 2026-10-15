@@ -4,6 +4,18 @@ What each release of Aether brings, newest first. Aether follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The section of a
 release is also the text of its GitHub release.
 
+## Unreleased
+
+### New
+
+- **You can see which memories each model call was given.** The
+  context record of every call now lists the memories it rendered, in the
+  order the prompt shows them, for Claude Code and Codex turns too. The prompt
+  itself is unchanged. Ask for a task or a single call with
+  `aether memory context --task <id>` or `--invocation <id>`; clients can
+  detect support with `memory_context`. This is the first step toward judging
+  memories by how the work they informed turned out.
+
 ## 1.0.7
 
 Lessons can wait for your approval before agents recall them. A Claude Code
