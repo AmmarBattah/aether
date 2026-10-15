@@ -4,6 +4,16 @@ What each release of Aether brings, newest first. Aether follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The section of a
 release is also the text of its GitHub release.
 
+## Unreleased
+
+### Fixed
+
+- **Unusable Claude Code receipts keep a cost floor when spend is observed.**
+  Missing or invalid dollars, all-zero receipts, and missing or reset
+  baselines leave an `Unreported` gap when the invocation streams usage or
+  the receipt reports nonzero per-turn usage. Model-less streams count too.
+  Receipts without spend evidence keep their previous recovery behavior.
+
 ## 1.0.9
 
 Cost figures are more accurate. A Claude Code agent that pauses and resumes
