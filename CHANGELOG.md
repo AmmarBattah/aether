@@ -4,7 +4,11 @@ What each release of Aether brings, newest first. Aether follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The section of a
 release is also the text of its GitHub release.
 
-## Unreleased
+## 1.0.8
+
+Saying whether a memory helped or hurt a task now changes how it ranks in
+recall, and you can see which memories each model call was given. The
+terminal no longer shows older state after it reconnects to the daemon.
 
 ### New
 
@@ -26,6 +30,17 @@ release is also the text of its GitHub release.
   `aether memory context --task <id>` or `--invocation <id>`; clients can
   detect support with `memory_context`. This is the first step toward judging
   memories by how the work they informed turned out.
+
+### Fixed
+
+- **The terminal no longer goes back in time after a reconnect.** When the
+  TUI or `--plain` reconnected to the same daemon, a late answer to a request
+  sent before the outage could overwrite newer state: an agent that had
+  failed showed as waiting again, or daemon-wide usage dropped to 0. Answers
+  from the replaced connection are now dropped when the new connection reads
+  the same thing again. Results of what you did still arrive, each settling
+  only its own request, and after a switch to another daemon and back
+  nothing from before the switch is applied.
 
 ### Before updating
 
