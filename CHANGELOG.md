@@ -50,6 +50,11 @@ release is also the text of its GitHub release.
   with an error. Escaped processes later in the search stayed alive, and a
   restarted daemon kept retrying the cleanup instead of finishing it. A
   process exiting mid-search is now skipped like one that has gone.
+- **An SSH remote no longer mistakes a finished send for one in flight.** If
+  the client started another program just as a send ended, the send's outbox
+  entry stayed locked until that program had started. Resolving the outbox on
+  connect could skip the entry, and `/outbox` could refuse it as being sent
+  by another process. Each entry is now unlocked as soon as its send ends.
 
 ### Before updating
 
