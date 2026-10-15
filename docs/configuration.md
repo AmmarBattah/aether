@@ -11,6 +11,9 @@ are the source for supported keys and defaults.
 [model]
 default = "claude-code/opus"
 
+[models.tiers]
+"openrouter/openai/gpt-5" = "strong"
+
 [scheduler]
 max_concurrent_turns = 8
 max_concurrent_engine_turns = 4
@@ -20,6 +23,20 @@ run_budget_usd = 25.0
 completed_run_days = 10
 ```
 
+- **Model tiers:** every model carries a capability band within its provider,
+  reported as `tier` by `list_models`: `fast` (Haiku, Luna), `balanced`
+  (Sonnet, Sol), `strong` (Opus, Astra) or `frontier` (Fable; Codex has none
+  today), or null when it cannot be ranked. A provider may lack a tier. The
+  tier comes from, in order: `[models.tiers]` in `config.toml`
+  (`"provider/model" = "fast" | "balanced" | "strong" | "frontier"`, aliases
+  accepted; the legacy `strongest` reads as `strong`; an unknown tier is a load
+  error), a `tier` on the catalog entry (also settable per model in
+  `providers.toml`), then, for a priced model without one, the tier of the
+  provider's tiered model nearest in output price ratio (a tie takes the lower
+  tier). Subscription models use their API equivalent's price. A priced model
+  with no tiered reference in its provider stays null, as do unpriced models
+  such as `default`. The daemon catalog and generated clients expose the same
+  tier as the agent tool.
 - **Models and effort:** choose them per agent; switch with `/model` or
   `aether set`. A running turn finishes on its original model; the new choice
   applies when the agent starts its next turn. Fallback chains are explicit
