@@ -4,6 +4,16 @@ What each release of Aether brings, newest first. Aether follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The section of a
 release is also the text of its GitHub release.
 
+## Unreleased
+
+### Fixed
+
+- **The daemon no longer churns the disk while agents work.** Reading a long
+  agent history made SQLite sort it in throwaway files under `/var/tmp`, tens
+  of MB per read. With several agents running, that held host IO pressure
+  high enough to stall other programs' syncs. Those sorts now stay in memory,
+  and what the store keeps, and when it syncs, is unchanged.
+
 ## 1.0.8
 
 Saying whether a memory helped or hurt a task now changes how it ranks in
