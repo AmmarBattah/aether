@@ -8,6 +8,14 @@ release is also the text of its GitHub release.
 
 ### Fixed
 
+- **Clipboard images paste into the terminal UI with Ctrl+V.** Ctrl+V prefers
+  offered plain text, otherwise attaches a supported image; Alt+V and `/image`
+  force an image. Text keeps the usual long-text placeholders and image-path
+  detection. A truly empty terminal paste also tries the clipboard image;
+  whitespace-only pastes and plain-mode input stay text. Reads happen in the
+  background; an empty clipboard, missing helper or SSH session gets a one-line
+  explanation without changing the draft. Existing custom key bindings are
+  preserved.
 - **Codex usage now carries a dollar estimate that says it is one.** A Codex
   (ChatGPT subscription) turn used to be booked as billed dollars at the
   OpenAI list price, so a run with any unreported part, such as an interrupted
