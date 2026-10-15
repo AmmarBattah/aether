@@ -125,6 +125,10 @@ create itself.
 [memory proposals](#memory-proposals). Check it before proposing, filtering or
 reviewing proposals. The Rust client refuses these requests to older daemons.
 
+`memory_feedback` means the host can record, retract and read evidence about
+memories a task saw; see [memory feedback](#memory-feedback). Check it before
+sending any of the three commands. The Rust client refuses them to older daemons.
+
 `repository_aliases` means the daemon serves `alias_repository` and
 `list_repository_aliases` (see [repository aliases](#repository-aliases)). An
 older daemon refuses both commands as unknown; the Rust client refuses to send
@@ -563,3 +567,90 @@ The command is host-only: the operator socket and the shared-token transport
 are served, paired devices are `forbidden`, and the runtime refuses agent
 actors. The CLI is `aether memory context --task <id>` or `--invocation <id>`,
 with `--json` for the reply as sent.
+
+
+### Memory feedback
+
+The host can record evidence about a memory a task saw. Check the Welcome
+feature `memory_feedback` first. All three commands are host-only: the local
+operator socket and shared-token transport are served; paired operators and
+observers are `forbidden`. The runtime also refuses agent actors, including
+reads. Feedback does not affect recall, scores, prompts or token counts.
+
+```json
+{"cmd":"record_memory_feedback","memory":"mem_...","verdict":"helped","evidence":"review","task":"tsk_...","invocation":"inv_...","reason":"The release check caught the regression","idempotency_key":"release-review-17"}
+```
+
+`task` is required. `verdict` is `helped`, `hurt` or `neutral`; `evidence` is
+`operator`, `review` or `outcome`. `invocation` is optional. `reason` must be
+nonblank and at most 4096 Unicode characters; the stored text is preserved.
+Unknown memory, task or invocation ids are `not_found`. A named invocation
+must resolve to a snapshot of that task, through its invocation row or its
+`invocation.failed` event when no row exists. A different task is
+`invalid_argument`.
+
+Without an invocation, the memory must occur in the retrieved-memory layer of
+an announced, stored snapshot of the task (legacy events use the snapshot's
+stored `memory_ids`). With an invocation, the memory must have been given to
+that call or an earlier call of the same task, because a resumed Claude Code or
+Codex session may retain earlier context. The named call's own stored memory
+list qualifies directly; earlier calls are those whose snapshot was created at
+or before the named call's snapshot, by wall-clock time. A memory seen only by
+a later call or another task does not qualify. A call refused before sending,
+for example over the context limit, still counts as given. This checks all
+calls directly in storage, including calls beyond the 256-snapshot
+`memories_in_context` limit. A never-shown proposal is refused with
+`invalid_argument`. Memories forgotten or superseded after being shown remain
+eligible. Expired history cannot prove new eligibility.
+
+The reply is `MemoryFeedback`:
+
+```json
+{"id":"mfb_...","memory":"mem_...","verdict":"helped","evidence":"review","task":"tsk_...","invocation":"inv_...","reason":"The release check caught the regression","actor":{"actor":"user"},"created_at":"2026-10-15T09:00:00Z"}
+```
+
+Each unkeyed submission appends a distinct record, including repeated verdicts
+on the same task. An `idempotency_key` replays the original reply and writes
+neither a second record nor a second event, even after a later retraction.
+Read `memory_feedback` for the current state; a keyed retry returns the original
+receipt. Reusing the key with different fields is refused. Receipt retention
+follows the existing keyed-submission rules. Recording emits a custom
+`memory.feedback` event whose payload has `feedback` (the new id), `memory`,
+`verdict`, `evidence`, `task`, optional `invocation`, and `reason`; the
+envelope also carries the task.
+
+```json
+{"cmd":"retract_memory_feedback","feedback":"mfb_...","reason":"The review was based on an obsolete build"}
+```
+
+Retraction preserves every original field and sets `retracted_at` and
+`retraction_reason`. It returns the record, and emits the custom event
+`memory.feedback_retracted` with `{feedback, memory, reason}`. An unknown id
+is `not_found`. The reason has the same bound as recording. Retrying a
+retraction returns the first retracted record and emits no second event;
+a different retry reason does not overwrite the first reason. If the task's
+history has expired, the retraction event carries neither a task nor a run in
+its envelope.
+
+```json
+{"cmd":"memory_feedback","memory":"mem_...","limit":100}
+{"records":[{"id":"mfb_...","memory":"mem_...","verdict":"helped","evidence":"review","task":"tsk_...","reason":"Release check passed","actor":{"actor":"user"},"created_at":"2026-10-15T09:00:00Z","retracted_at":"2026-10-15T10:00:00Z","retraction_reason":"Obsolete build"}],"truncated":false}
+```
+
+This read-only command returns `MemoryFeedbackList`: newest first, including
+retracted records. The default and maximum limit are 100; values outside
+1–100 are `invalid_argument`. `truncated` says more records exist. Feedback
+survives history retention. Memory and feedback records are not part of run
+export/import. Their audit events can travel with run history; typed ids in
+those events are remapped, but importing does not recreate memory or feedback
+records.
+
+The CLI mirrors these commands:
+
+```sh
+aether memory feedback record <memory> --task <id> --verdict helped --evidence review --reason 'Release check passed'
+aether memory feedback retract <feedback> --reason 'Obsolete build'
+aether memory feedback list <memory> --json
+```
+
+Recording also accepts `--invocation <id>`. All three accept `--json`.

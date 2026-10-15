@@ -775,6 +775,9 @@ why `host_only` is open to it; it gains none of the remote administration.
 | `alias_repository` | host_only | Moves memory between repository scopes, irreversibly. |
 | `list_repository_aliases` | observe | |
 | `memories_in_context` | host_only | Which memories each model call saw; for weighing them. |
+| `record_memory_feedback` | host_only | Records evidence on a memory the named task saw. |
+| `retract_memory_feedback` | host_only | Withdraws feedback while preserving the original record. |
+| `memory_feedback` | host_only | Reads recent feedback, including retractions. |
 | `list_runs` | observe | |
 | `get_run_report` | observe | |
 | `replay` | observe | |
@@ -1599,6 +1602,7 @@ gone while the ledger still vouches for it.
 | `set_approvals` | `idempotency_key` | can overwrite a later policy |
 | `update_schedule` | `idempotency_key` | can overwrite a later transition |
 | `create_memory` | `idempotency_key` | can create a duplicate |
+| `record_memory_feedback` | `idempotency_key` | records a second verdict |
 | `add_approval_rule` | `idempotency_key` | creates a duplicate where remotely allowed |
 
 Keys from device connections are scoped to the enrolled device id, surviving
