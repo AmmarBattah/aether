@@ -20,6 +20,18 @@ pub(super) struct SessionCost {
     reset: bool,
 }
 
+/// What an invocation showed about spend before its closing receipt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SpendEvidence {
+    /// Streamed or per-turn usage shows a model ran.
+    Seen,
+    /// No usage arrived, but the invocation may still have answered.
+    Unseen,
+    /// No usage arrived, nothing earlier in the process can have been billed,
+    /// and the API refused the request with a status it does not bill.
+    Rejected,
+}
+
 pub(super) struct Receipt {
     pub cost_usd: Option<f64>,
     pub cost_usage: Option<Usage>,
@@ -66,8 +78,9 @@ impl SessionCost {
         &mut self,
         value: &Value,
         streamed: &ModelUsage,
-        has_spend: bool,
+        spend: SpendEvidence,
     ) -> Receipt {
+        let has_spend = spend == SpendEvidence::Seen;
         let Some(dollars) = value.get("total_cost_usd").and_then(Value::as_f64) else {
             return unknown_receipt(None, has_spend);
         };
@@ -79,6 +92,9 @@ impl SessionCost {
         let mut total = models.as_ref().map(sum_counters).unwrap_or_default();
         total.set_cost(Some(dollars));
         if dollars == 0.0 && total.total_tokens() == 0 && total.reasoning_tokens.unwrap_or(0) == 0 {
+            if spend == SpendEvidence::Rejected {
+                return zero_receipt();
+            }
             return unknown_receipt(
                 Some("Claude session receipt is zeroed; this invocation's billed cost is unknown"),
                 has_spend,
@@ -225,15 +241,29 @@ impl SessionCost {
     }
 }
 
+/// A refused request with no usage streamed or counted billed nothing.
+fn zero_receipt() -> Receipt {
+    Receipt {
+        cost_usd: Some(0.0),
+        cost_usage: None,
+        events: Vec::new(),
+    }
+}
+
+/// Marks the turn's cost as missing a reading the engine never reported.
+pub(super) fn cost_gap() -> EngineEvent {
+    let mut usage = Usage::default();
+    usage.mark_cost_gap(aether_core::model::CostGap::Unreported);
+    EngineEvent::UsageDelta { usage }
+}
+
 fn unknown_receipt(note: Option<&str>, has_spend: bool) -> Receipt {
     let mut events = Vec::new();
     if let Some(note) = note {
         events.push(EngineEvent::ProtocolNote(note.into()));
     }
     if has_spend {
-        let mut usage = Usage::default();
-        usage.mark_cost_gap(aether_core::model::CostGap::Unreported);
-        events.push(EngineEvent::UsageDelta { usage });
+        events.push(cost_gap());
     }
     Receipt {
         cost_usd: None,

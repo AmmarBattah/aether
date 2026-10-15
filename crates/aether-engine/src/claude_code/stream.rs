@@ -9,6 +9,7 @@ use serde_json::Value;
 use crate::{EngineEvent, EngineOutcome, UsageRequestId};
 
 mod accounting;
+mod refusal;
 
 /// Per-process parser state: tool names by content-block index for the
 /// message being streamed (so input deltas carry the name), and the steered
@@ -22,6 +23,13 @@ pub struct ParseState {
     message_models: std::collections::BTreeMap<UsageRequestId, String>,
     streamed_models: std::collections::BTreeMap<String, Usage>,
     streamed_usage_seen: bool,
+    /// A closing receipt in this process counted usage, streamed or not.
+    receipt_usage_seen: bool,
+    /// An earlier receipt, model output, or a retry after an attempt the API did not
+    /// refuse may have been billed without usage to show for it.
+    refusal_unprovable: bool,
+    /// This process proved a receipt unbilled; a later retry, request or output withdraws it.
+    zero_proven: bool,
     /// The keys above in the order they were first seen, so the map can be
     /// bounded without evicting the message still being streamed.
     usage_order: VecDeque<UsageRequestId>,
@@ -151,6 +159,8 @@ pub fn parse_line(line: &str, state: &mut ParseState) -> Vec<EngineEvent> {
                     .to_owned(),
                 running: false,
             }],
+            Some("api_retry") => state.note_retry(&v),
+            Some("status") => state.note_status(&v),
             Some("init") => {
                 vec![EngineEvent::Session {
                     id: v
@@ -176,11 +186,15 @@ pub fn parse_line(line: &str, state: &mut ParseState) -> Vec<EngineEvent> {
         "rate_limit_event" => vec![EngineEvent::RateLimit {
             payload: v.get("rate_limit_info").cloned().unwrap_or(Value::Null),
         }],
-        "stream_event" => v
-            .get("event")
-            .map(|e| stream_deltas(e, state))
-            .unwrap_or_default(),
+        "stream_event" => {
+            let mut events = state.note_output(&v);
+            if let Some(event) = v.get("event") {
+                events.extend(stream_deltas(event, state));
+            }
+            events
+        }
         "assistant" => {
+            let mut events = state.note_output(&v);
             let message = &v["message"];
             let content = parse_content(message.get("content"));
             // Usage rides the delta stream alone, keyed per message: attaching
@@ -193,14 +207,14 @@ pub fn parse_line(line: &str, state: &mut ParseState) -> Vec<EngineEvent> {
                 None => Vec::new(),
             };
             state.tool_names.clear();
-            let mut events = vec![EngineEvent::Assistant {
+            events.push(EngineEvent::Assistant {
                 content,
                 usage: None,
                 model: message
                     .get("model")
                     .and_then(Value::as_str)
                     .map(str::to_owned),
-            }];
+            });
             events.extend(accounting);
             events
         }
@@ -250,6 +264,7 @@ pub fn parse_line(line: &str, state: &mut ParseState) -> Vec<EngineEvent> {
             out
         }
         "result" if state.prompt.is_some() && is_queued_work_result(&v) => {
+            state.note_skipped_receipt();
             vec![EngineEvent::Note(
                 "claude-code ended a turn it queued ahead of the prompt; awaiting the prompt's own result"
                     .into(),
@@ -261,12 +276,12 @@ pub fn parse_line(line: &str, state: &mut ParseState) -> Vec<EngineEvent> {
                 v.get("is_error").and_then(Value::as_bool).unwrap_or(false) || subtype != "success";
             let text = v.get("result").and_then(Value::as_str).map(str::to_owned);
             let usage = v.get("usage").map(parse_usage).unwrap_or_default();
-            let has_spend = state.streamed_usage_seen
-                || usage.total_tokens() > 0
-                || usage.reasoning_tokens.is_some_and(|tokens| tokens > 0);
+            state.receipt_usage_seen |=
+                usage.total_tokens() > 0 || usage.reasoning_tokens.is_some_and(|tokens| tokens > 0);
+            let spend = state.spend_evidence(&v, is_error);
             let receipt = state
                 .session_cost
-                .receipt(&v, &state.streamed_models, has_spend);
+                .receipt(&v, &state.streamed_models, spend);
             let cost_usd = receipt.cost_usd;
             let cost_usage = receipt.cost_usage;
             let mut events = receipt.events;
