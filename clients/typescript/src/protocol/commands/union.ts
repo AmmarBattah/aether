@@ -69,6 +69,7 @@ import type {
   PublishArtifactCommand,
   ReadArtifactCommand,
   RecordMemoryFeedbackCommand,
+  RefreshProviderUsageCommand,
   RejectMemoryCommand,
   ReplayCommand,
   ReplyToQuestionCommand,
@@ -173,6 +174,7 @@ export type Command =
   | PublishArtifactCommand
   | ReadArtifactCommand
   | RecordMemoryFeedbackCommand
+  | RefreshProviderUsageCommand
   | RejectMemoryCommand
   | ReplayCommand
   | ReplyToQuestionCommand

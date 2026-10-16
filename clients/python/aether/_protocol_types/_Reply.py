@@ -40,6 +40,7 @@ from ._ReplyOk import ReplyOk
 from ._ReplyPairing import ReplyPairing
 from ._ReplyPathCompletions import ReplyPathCompletions
 from ._ReplyPaused import ReplyPaused
+from ._ReplyProviderUsage import ReplyProviderUsage
 from ._ReplyProviders import ReplyProviders
 from ._ReplyPushConfig import ReplyPushConfig
 from ._ReplyRemote import ReplyRemote
@@ -121,6 +122,7 @@ Reply = (
     ReplyMcpServers |
     ReplyModels |
     ReplyProviders |
+    ReplyProviderUsage |
     ReplyAuth |
     ReplyEngineTool |
     ReplyEngineTools |

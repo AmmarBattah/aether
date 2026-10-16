@@ -549,6 +549,12 @@
     }
   },
   {
+    "access": "operate",
+    "command": {
+      "cmd": "refresh_provider_usage"
+    }
+  },
+  {
     "access": "observe",
     "command": {
       "cmd": "mcp_servers"

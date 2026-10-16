@@ -332,6 +332,7 @@ pub enum Reply {
     McpServers(Vec<McpServerHealth>),
     Models(Vec<ModelInfo>),
     Providers(Vec<ProviderInfo>),
+    ProviderUsage(serde_json::Value),
     Auth(Vec<AuthInfo>),
     EngineTool {
         content: String,
