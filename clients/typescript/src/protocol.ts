@@ -1,12 +1,13 @@
 // Generated from clients/protocol.schema.json by scripts/generate_clients.py.
 // Do not edit: change the Rust types and regenerate.
 
-export const PROTOCOL_VERSION = 22;
+export const PROTOCOL_VERSION = 23;
 export const MIN_PROTOCOL_VERSION = 17;
 
 export * from "./protocol/commands/accept.ts";
 export * from "./protocol/commands/add.ts";
 export * from "./protocol/commands/alias.ts";
+export * from "./protocol/commands/append.ts";
 export * from "./protocol/commands/archive.ts";
 export * from "./protocol/commands/auth.ts";
 export * from "./protocol/commands/cancel.ts";
@@ -220,6 +221,7 @@ export * from "./protocol/types/ModelInfo.ts";
 export * from "./protocol/types/ModelRef.ts";
 export * from "./protocol/types/NetworkPolicy.ts";
 export * from "./protocol/types/NewApprovalRule.ts";
+export * from "./protocol/types/NoteContext.ts";
 export * from "./protocol/types/OpenLoop.ts";
 export * from "./protocol/types/OperatorMemoryScope.ts";
 export * from "./protocol/types/OperatorMemorySpec.ts";
@@ -257,6 +259,7 @@ export * from "./protocol/types/ReplayApproval.ts";
 export * from "./protocol/types/ReplayContext.ts";
 export * from "./protocol/types/ReplayFrame.ts";
 export * from "./protocol/types/ReplayMessage.ts";
+export * from "./protocol/types/ReplayNote.ts";
 export * from "./protocol/types/ReplayTool.ts";
 export * from "./protocol/types/Reply.ts";
 export * from "./protocol/types/RepositoryAlias.ts";

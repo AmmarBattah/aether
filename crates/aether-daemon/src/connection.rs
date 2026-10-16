@@ -321,6 +321,7 @@ where
                                                     features::PRUNE_BUILD_OUTPUT.into(),
                                                     features::WORKSPACE_REVIEW.into(),
                                                     features::BUILD_CACHE.into(),
+                                                    features::NOTES.into(),
                                                 ],
                                                 daemon_protocol_version: Some(
                                                     aether_protocol::PROTOCOL_VERSION,

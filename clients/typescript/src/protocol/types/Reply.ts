@@ -151,6 +151,14 @@ export interface ReplyMessageSent {
 }
 
 /**
+ * The note's event, by its sequence number in the log.
+ */
+export interface ReplyNoteAppended {
+  "data": Record<string, unknown>;
+  "reply": "note_appended";
+}
+
+/**
  * One entry per agent a fanned-out message reached, in delivery order.
  */
 export interface ReplyMessagesSent {
@@ -411,6 +419,7 @@ export type Reply =
     ReplyTask |
     ReplyTasks |
     ReplyMessageSent |
+    ReplyNoteAppended |
     ReplyMessagesSent |
     ReplyApprovals |
     ReplyApprovalRule |
