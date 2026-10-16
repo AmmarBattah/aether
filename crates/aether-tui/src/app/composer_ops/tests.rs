@@ -547,6 +547,37 @@ fn agent_mentions_expand_at_submit_without_rerouting() {
 }
 
 #[test]
+fn forwarded_slash_commands_keep_their_mentions_as_typed() {
+    let (mut app, id) = app_with(AgentStatus::Ready);
+    add_child(&mut app, id, "researcher");
+    typed(&mut app, "/answer 3 @researcher");
+    let effects = app.composer_submit();
+    assert_eq!(sent(&effects), [(id, "/answer 3 @researcher".to_owned())]);
+
+    let (mut app, id) = app_with(AgentStatus::Running);
+    add_child(&mut app, id, "researcher");
+    typed(&mut app, "/answer 3 @researcher");
+    assert!(app.composer_queue().is_empty());
+    assert_eq!(app.transcripts[&id].queue, ["/answer 3 @researcher"]);
+
+    for status in [AgentStatus::Ready, AgentStatus::Running] {
+        let (mut app, id) = app_with(status.clone());
+        add_child(&mut app, id, "researcher");
+        let prefix = format!("/answer 3 {}", "x".repeat(PASTE_PLACEHOLDER_CHARS));
+        app.composer_paste(&prefix);
+        assert_eq!(app.input.pastes.len(), 1, "the prefix is a placeholder");
+        typed(&mut app, " @researcher");
+        let expected = format!("{prefix} @researcher");
+        let effects = app.composer_queue();
+        let delivered = match status {
+            AgentStatus::Running => app.transcripts[&id].queue.clone(),
+            _ => sent(&effects).into_iter().map(|(_, text)| text).collect(),
+        };
+        assert_eq!(delivered, [expected], "{status:?}");
+    }
+}
+
+#[test]
 fn mentions_of_a_shared_name_or_already_expanded_stay_as_typed() {
     let (mut app, id) = app_with(AgentStatus::Ready);
     let first = add_child(&mut app, id, "tester");
