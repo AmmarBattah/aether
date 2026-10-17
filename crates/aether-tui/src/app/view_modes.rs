@@ -25,9 +25,20 @@ impl App {
 
     pub fn parse_input(&self, text: &str) -> InputAction {
         let parsed = crate::commands::parse(text);
-        if let InputAction::Command(SlashCommand::Unknown(name)) = &parsed
-            && self.view_modes.modes.contains_key(name)
-        {
+        let InputAction::Command(SlashCommand::Unknown(name)) = &parsed else {
+            return parsed;
+        };
+        let live = self.selected.is_some_and(|id| !self.is_terminal(id));
+        // A listed host command always goes to the host, even past a view mode
+        // reloaded under its name.
+        let host = &self.options.host_commands;
+        if host.find(name).is_some() && !live {
+            return InputAction::Command(SlashCommand::Invalid(format!(
+                "/{name} is for {}; view a live agent to send it",
+                host.host
+            )));
+        }
+        if host.find(name).is_none() && self.view_modes.modes.contains_key(name) {
             if text.split_whitespace().count() != 1 {
                 return InputAction::Command(SlashCommand::Invalid(format!("usage: /{name}")));
             }
@@ -41,9 +52,7 @@ impl App {
         }
         // Another program's vocabulary (Archon's `/answer 3 yes`) reaches a live
         // agent verbatim; with none to receive it, it stays an unknown command.
-        if let InputAction::Command(SlashCommand::Unknown(_)) = &parsed
-            && self.selected.is_some_and(|id| !self.is_terminal(id))
-        {
+        if live {
             return InputAction::Message(text.trim().to_owned());
         }
         parsed
