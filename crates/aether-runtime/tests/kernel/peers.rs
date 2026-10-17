@@ -168,3 +168,57 @@ async fn send_message_refuses_agents_outside_the_parents_subtree() {
         "each refusal is an error outcome the model sees"
     );
 }
+
+/// A delegated leaf is offered `list_peers` and finds its sibling with it,
+/// while the lead's `swarm_playbook` is neither offered nor run.
+#[tokio::test]
+async fn a_delegated_leaf_lists_its_peers_but_not_the_playbook() {
+    let h = harness(vec![]).await;
+    let mut lead_spec = idle(None, false);
+    lead_spec.config.as_mut().expect("config").long_lived = true;
+    let (lead, _) = h
+        .runtime
+        .create_agent(lead_spec, Actor::user())
+        .expect("lead");
+    let (sibling, _) = h
+        .runtime
+        .create_agent(idle(Some(lead.id), true), Actor::user())
+        .expect("sibling");
+    let (worker, _) = h
+        .runtime
+        .create_agent(idle(Some(lead.id), true), Actor::user())
+        .expect("worker");
+
+    h.client.push(ScriptedClient::tool_calls(
+        &[
+            ("list_peers", json!({})),
+            ("swarm_playbook", json!({})),
+            ("complete_task", json!({"summary": "looked around"})),
+        ],
+        None,
+    ));
+    assign(&h, worker.id, "find your peers");
+    h.wait_until(worker.id, |s| s.kind() == AgentStatusKind::Completed)
+        .await;
+
+    let requests = h.client.requests();
+    assert_eq!(requests.len(), 1);
+    let offered: Vec<_> = requests[0].tools.iter().map(|t| t.name.as_str()).collect();
+    assert!(offered.contains(&"list_peers"), "{offered:?}");
+    assert!(!offered.contains(&"swarm_playbook"), "{offered:?}");
+
+    let events = h
+        .store
+        .events(0, 10_000, &EventFilter::for_agent(worker.id))
+        .expect("events");
+    let listed = events.iter().any(|e| {
+        matches!(&e.kind, EventKind::ToolSucceeded { outcome, .. }
+            if !outcome.is_error && outcome.content.contains(&sibling.id.to_string()))
+    });
+    assert!(listed, "list_peers names the sibling");
+    let refused = events.iter().any(|e| {
+        matches!(&e.kind, EventKind::ToolFailed { error, .. }
+            if error.contains("`swarm_playbook` is withheld from leaf agents"))
+    });
+    assert!(refused, "the playbook is refused to a leaf");
+}

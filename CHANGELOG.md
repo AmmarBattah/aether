@@ -4,6 +4,32 @@ What each release of Aether brings, newest first. Aether follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The section of a
 release is also the text of its GitHub release.
 
+## Unreleased
+
+### New
+
+- **Swarms: delegated peers find and message each other.** A lead can split
+  one change across parallel leaf workers in isolated workspaces, and the
+  workers coordinate directly instead of relaying through the lead.
+  `list_peers` pages a delegated agent's siblings (id, name, role, status,
+  task and a short objective), and a sibling's `send_message` wakes a peer
+  waiting on its inbox or on `wait_for(message_from)`. `swarm_playbook`
+  returns the recipe: disjoint tasks with owned paths, `leaf: true` workers
+  with `allowed_paths`, peer coordination, and integration in plan order.
+
+### Changed
+
+- **A delegated agent's messages stay within its team.** `send_message` from
+  a delegated agent reaches only its parent's subtree and its own ancestors,
+  and a `subtree=true` fan-out only its parent's subtree. A refused message
+  is an error the model sees, naming the rule. Root agents keep their reach.
+- **Swarm tools cost nothing where they cannot help.** `list_peers` is
+  offered only to delegated agents, since a root agent has no peers, and
+  `swarm_playbook` only to agents that may delegate. A lone root agent's
+  tool list grows by 185 bytes over 1.1.0, the playbook's short descriptor;
+  the playbook's text is returned by the call, not carried in the
+  description.
+
 ## 1.1.0
 
 Delegated agents now share a warm, size-bounded build cache outside their

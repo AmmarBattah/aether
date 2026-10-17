@@ -51,8 +51,8 @@ impl Tool for InspectionTool {
             ),
             Self::Peers => (
                 "list_peers",
-                "List your peers: the other agents your parent delegated, with id, name, role, status and task objective. Message one with send_message; wait for one with wait_for(message_from). A root agent has no peers.",
-                json!({"type":"object","properties":{"after":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":MAX_LIST_ITEMS,"default":10}},"additionalProperties":false}),
+                "List the other agents your parent delegated. Pass next_after as after for more.",
+                json!({"type":"object","properties":{"after":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":MAX_LIST_ITEMS}},"additionalProperties":false}),
             ),
             Self::Tasks => (
                 "list_tasks",

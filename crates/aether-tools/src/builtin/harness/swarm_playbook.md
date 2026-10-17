@@ -11,8 +11,9 @@ less, do the work yourself or delegate one child.
    it owns, disjoint from every other task's; the interfaces it provides and
    consumes, with exact signatures; acceptance commands; the task ids it
    depends on.
-2. Give each worker its own task and the shared interfaces, nothing more: not
-   your conversation, not the other tasks' details. Workers start cold.
+2. Give each worker its own task, the shared interfaces and the Worker rules
+   below, nothing more: not your conversation, not the other tasks' details.
+   Workers start cold and cannot read this playbook.
 3. Delegate one worker per task: `delegate` with `leaf: true`,
    `workspace_mode: "isolated"`, `allowed_paths` set to the task's owned
    paths, `wait: false`, a fast-tier model from `list_models` and an explicit

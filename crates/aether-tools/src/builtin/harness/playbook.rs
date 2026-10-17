@@ -1,7 +1,8 @@
 use super::*;
 use aether_core::tool::ToolOutcome;
 
-/// How a lead and its workers build one change together, for any agent.
+/// How a lead and its workers build one change together. Only a lead reads
+/// it; workers get the Worker rules in their objectives.
 pub const SWARM_PLAYBOOK: &str = include_str!("swarm_playbook.md");
 
 #[derive(Debug)]
@@ -12,7 +13,7 @@ impl Tool for SwarmPlaybook {
     fn descriptor(&self) -> ToolDescriptor {
         harness_descriptor(
             "swarm_playbook",
-            "Read Aether's swarm playbook: how a lead plans disjoint tasks, delegates leaf workers in isolated workspaces, how peers coordinate with list_peers and send_message, and how the lead integrates in plan order.",
+            "How to split one change across parallel leaf workers.",
             json!({"type":"object", "properties":{}, "additionalProperties":false}),
         )
     }
