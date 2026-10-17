@@ -22,6 +22,7 @@ pub mod memory_context;
 pub mod memory_curation;
 mod memory_feedback;
 pub mod notes;
+mod peers;
 pub mod recovery;
 mod repository_aliases;
 pub mod resources;

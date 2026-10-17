@@ -231,11 +231,12 @@ impl Tool for SendMessage {
             "Send a message to another agent's inbox. It wakes the recipient if it is waiting for messages. \
              Set `subtree` to broadcast the same message to the recipient and every live agent beneath it. \
              A message to your own child also interrupts any wait it is holding (except an approval wait); \
-             a message to any other agent, including your parent, waits until that agent's condition is satisfied.",
+             a message to any other agent, including your parent, waits until that agent's condition is satisfied. \
+             A delegated agent reaches its parent's subtree (its peers included) and its own ancestors.",
             json!({
                 "type": "object",
                 "properties": {
-                    "to": {"type": "string", "description": "Recipient agent ID (`agt_...`) from delegate.agent_id, inspect_state, or an Aether inbox sender. Display names and native paths such as `/root` are not IDs."},
+                    "to": {"type": "string", "description": "Recipient agent ID (`agt_...`) from delegate.agent_id, list_peers, inspect_state, or an Aether inbox sender. Display names and native paths such as `/root` are not IDs."},
                     "content": {"type": "string"},
                     "subtree": {"type": "boolean", "default": false, "description": "Deliver to the recipient and every live descendant instead of the recipient alone."}
                 },

@@ -229,6 +229,7 @@ pub(super) fn decides(action: &HarnessAction) -> Decides {
         | HarnessAction::UpdateSchedule { .. }
         | HarnessAction::InspectState
         | HarnessAction::ListAgents { .. }
+        | HarnessAction::ListPeers { .. }
         | HarnessAction::ListTasks { .. }
         | HarnessAction::ReadTask { .. }
         | HarnessAction::ReadArtifact { .. }
