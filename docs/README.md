@@ -10,6 +10,9 @@ Start with the [README](../README.md) for prerequisites, installation, and a fir
 - [Prerequisite details](prerequisites.md): optional programs and feature-specific setup.
 - [Configuration](configuration.md): common settings, defaults, and storage paths.
 - [Harness measurements](benchmarks.md): the detailed comparisons formerly in the README.
+- [Release bench](release-bench.md): `make bench-release`, the regression
+  check run before each release on the last release, the candidate and the
+  native CLIs.
 - [Development](development.md): build, test, and CI entry points.
 - [Architecture](../ARCHITECTURE.md): ownership, execution paths, persistence,
   and where code lives.
@@ -54,6 +57,11 @@ show. Reports are never pooled across protocol versions. To run a comparison
 yourself, see the [evaluation tooling](../evals/README.md) and its
 [protocol](../evals/harness_bench_protocol.md).
 
+- [Release bench A/A check of set v2](release-bench-2026-10-18-aa-v2.md): Aether
+  1.1.0 against itself on 110 tasks and six arms, 660 trials; the gate passes on
+  both tiers, and the verdict is INCONCLUSIVE because v2 is off target.
+- [Release bench A/A check of set v1](release-bench-2026-10-18-aa.md): Aether
+  1.1.0 against itself on 92 tasks and six arms, 552 trials; the gate passes.
 - [Native versus Aether, six cases, second sitting](harness-bench-2026-10-11.md):
   Haiku 5.5 and GPT-6 Luna at medium effort, 72 trials on six held-out-graded
   tasks under protocol version 2, with paired statistics.
