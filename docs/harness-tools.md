@@ -16,7 +16,7 @@ native tool discovery. The schemas in `aether-tools/src/builtin/harness.rs`
 | Workflow | Tools | Behavior |
 |---|---|---|
 | Discover models | `list_models` | Configured provider/model IDs, supported effort, availability and a `tier` (`fast`, `balanced`, `strong`, `frontier`, or null) per model. Pick by tier, not name; see the model tiers note in [configuration](configuration.md). |
-| Inspect current state | `inspect_state` | Own agent/task, model, effort, context, budgets, concurrency and compaction policy. |
+| Inspect current state | `inspect_state` | Own agent/task, model, effort, context, limits, concurrency and compaction policy. Limits sit beside `remaining_token_budget`: `cost_budget` (USD or null), `subtree_cost_spent_usd` and `subtree_cost_is_a_floor` (the agent plus its descendants; a floor when some invocations are unpriced), `max_turns` (or null) with `turns_taken`, and `deadline` (RFC 3339 or null). |
 | Retrieve stored output | `read_artifact` | Scoped UTF-8 text pages with byte offsets and continuation cursors; available to API agents and CLI engines. |
 | Inspect delegated work | `list_agents`, `list_tasks`, `read_task` | Scoped metadata pages and bounded task/result reads, including completed descendants. |
 | Delegate | `delegate` | Creates a tracked child and task; requires explicit `model` (`provider/model`) and `effort`; neither is inherited. Returned agent and task IDs are different identifiers. `workspace_mode` selects a shared workspace (the default) or an isolated Git worktree. `host_context` (`full` or `lean`) is inherited from the parent when omitted; see [lean host context](engines.md#lean-host-context). |
@@ -29,6 +29,13 @@ native tool discovery. The schemas in `aether-tools/src/builtin/harness.rs`
 | Wait or ask | `wait_for`, `ask_user` | Durable waits for tasks/messages/time, or a question for the person. |
 | Preserve knowledge | `remember`, `request_checkpoint` | Stores reusable knowledge or requests validated context compaction. |
 | Repeat work | `create_schedule`, `list_schedules`, `update_schedule` | Durable interval/cron triggers, delivery history, pause/resume/cancel. |
+
+`complete_task` and `fail_task` bound their payloads and refuse an oversized
+or malformed one with a tool error that names the field; the task stays open
+and the agent may retry. `summary` and `error` are at most 256 KiB (262144
+bytes). `structured`, when present, must be a JSON object (not `null`, an array,
+a string or a number; omit it to send none) of at most 1 MiB serialized. Put
+bulk output in an artifact and reference it from the summary.
 
 The protocol `create_agent` command also requires explicit `config.effort` whenever
 `parent` is set: `low`, `medium`, `high`, `xhigh` or `max`. Missing effort is refused

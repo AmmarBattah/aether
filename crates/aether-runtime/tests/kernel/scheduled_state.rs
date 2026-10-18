@@ -145,3 +145,110 @@ async fn state_tools_report_runtime_facts_without_mutating_task_state() {
         );
     }
 }
+
+#[tokio::test]
+async fn inspect_state_reports_cost_budget_turn_limit_and_deadline() {
+    let h = harness(vec![
+        ScriptedClient::tool_call("inspect_state", json!({})),
+        ScriptedClient::tool_call("complete_task", json!({"summary": "done"})),
+    ])
+    .await;
+    let deadline = now() + chrono::Duration::days(365);
+    let mut limited = spec("report your limits");
+    limited.config = limited.config.map(|config| AgentConfig {
+        cost_budget: Some(0.5),
+        max_turns: Some(7),
+        deadline: Some(deadline),
+        ..config
+    });
+    let (agent, _) = h.runtime.create_agent(limited, Actor::user()).unwrap();
+    h.wait_until(agent.id, |s| s.is_terminal()).await;
+    let state = h
+        .store
+        .events(0, 10_000, &EventFilter::for_agent(agent.id))
+        .unwrap()
+        .into_iter()
+        .find_map(|e| match e.kind {
+            EventKind::ToolSucceeded { outcome, .. } => {
+                outcome.structured.filter(|v| v.get("compaction").is_some())
+            }
+            _ => None,
+        })
+        .expect("inspect_state result");
+    assert_eq!(state["cost_budget"], 0.5);
+    assert_eq!(state["max_turns"], 7);
+    assert_eq!(state["deadline"], deadline.to_rfc3339());
+    assert!(state["turns_taken"].is_u64());
+    assert!(state["subtree_cost_spent_usd"].is_number());
+    assert!(state["subtree_cost_is_a_floor"].is_boolean());
+}
+
+#[tokio::test]
+async fn inspect_state_reports_unset_limits_as_null() {
+    let h = harness(vec![
+        ScriptedClient::tool_call("inspect_state", json!({})),
+        ScriptedClient::tool_call("complete_task", json!({"summary": "done"})),
+    ])
+    .await;
+    let (agent, _) = h
+        .runtime
+        .create_agent(spec("report no limits"), Actor::user())
+        .unwrap();
+    h.wait_until(agent.id, |s| s.is_terminal()).await;
+    let state = h
+        .store
+        .events(0, 10_000, &EventFilter::for_agent(agent.id))
+        .unwrap()
+        .into_iter()
+        .find_map(|e| match e.kind {
+            EventKind::ToolSucceeded { outcome, .. } => {
+                outcome.structured.filter(|v| v.get("compaction").is_some())
+            }
+            _ => None,
+        })
+        .expect("inspect_state result");
+    for field in ["cost_budget", "max_turns", "deadline"] {
+        assert!(state[field].is_null(), "{field}: {state}");
+    }
+}
+
+#[tokio::test]
+async fn an_api_batch_cannot_delegate_or_message_after_a_wait() {
+    let h = harness(vec![ScriptedClient::tool_calls(
+        &[
+            ("wait_for", json!({"wake_at": (now() + chrono::Duration::hours(1)).to_rfc3339()})),
+            (
+                "delegate",
+                json!({"model":"anthropic/claude-sonnet-5-5", "effort":"low", "role": "worker", "objective": "late work", "wait": false}),
+            ),
+            (
+                "send_message",
+                json!({"to": AgentId::new().to_string(), "content": "late"}),
+            ),
+        ],
+        None,
+    )])
+    .await;
+    let (agent, _) = h
+        .runtime
+        .create_agent(spec("wait then act"), Actor::user())
+        .unwrap();
+    h.wait_until(agent.id, |s| matches!(s, AgentStatus::Waiting { .. }))
+        .await;
+    let children = h
+        .store
+        .agents(&AgentFilter {
+            parent: Some(agent.id),
+            ..Default::default()
+        })
+        .unwrap();
+    assert!(children.is_empty(), "a child was spawned after the wait");
+    let failed = h
+        .store
+        .events(0, 10_000, &EventFilter::for_agent(agent.id))
+        .unwrap()
+        .into_iter()
+        .filter(|e| matches!(&e.kind, EventKind::ToolFailed { error, .. } if error.contains("turn is over")))
+        .count();
+    assert_eq!(failed, 2);
+}
