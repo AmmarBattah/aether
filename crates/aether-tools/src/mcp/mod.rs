@@ -21,6 +21,7 @@ use std::time::Duration;
 use aether_core::id::{AgentId, TaskId};
 pub use aether_core::mcp::qualified_name;
 use aether_core::mcp::{McpAuth, McpAuthState, McpServerHealth, McpServerState, McpToolInfo};
+use aether_core::redact::{redact_argv, redact_locator};
 use aether_core::time::{Timestamp, now};
 use aether_core::tool::SideEffectClass;
 
@@ -110,20 +111,19 @@ impl std::fmt::Debug for McpTransportSpec {
 }
 
 impl McpTransportSpec {
-    /// One line a person can recognise the server by. Never carries a token.
+    /// One line a person can recognise the server by. Never carries a token,
+    /// nor a URL password or a secret-looking argument.
     pub fn describe(&self) -> String {
         match self {
             Self::Stdio { command, args, .. } => {
-                let mut text = format!("stdio: {}", command.display());
-                for arg in args {
-                    text.push(' ');
-                    text.push_str(arg);
-                }
-                text
+                let mut parts =
+                    vec![redact_locator(&format!("stdio: {}", command.display())).into_owned()];
+                parts.extend(redact_argv(args));
+                parts.join(" ")
             }
             Self::Http { url, token } => {
                 let auth = if token.is_some() { " (token)" } else { "" };
-                format!("http: {url}{auth}")
+                redact_locator(&format!("http: {url}{auth}")).into_owned()
             }
         }
     }
@@ -281,7 +281,7 @@ impl ServerSlot {
             Ok(s) => McpServerHealth {
                 state: s.state,
                 tools: s.tools.iter().map(|t| t.info.clone()).collect(),
-                error: s.error.clone(),
+                error: s.error.as_deref().map(|e| redact_locator(e).into_owned()),
                 checked_at: s.checked_at,
                 auth: self.spec.auth.clone(),
                 ..unknown
