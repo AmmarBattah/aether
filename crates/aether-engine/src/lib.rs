@@ -707,7 +707,9 @@ where
         });
         let stderr_text = stderr.text;
         if !response_done {
-            let tail: String = stderr_text
+            // Masked before the tail is cut, so a key's BEGIN marker is still in view.
+            let masked = aether_core::redact::Redactor::default().redact(&stderr_text);
+            let tail: String = masked
                 .lines()
                 .rev()
                 .take(6)

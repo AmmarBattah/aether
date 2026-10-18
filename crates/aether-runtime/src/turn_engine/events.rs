@@ -570,6 +570,13 @@ pub(super) fn handle_event(
                 }
                 None => (content, is_error),
             };
+            // Engine tools print whatever the shell holds, and bridge replies
+            // skip the tool runtime's masking: mask the final content here.
+            let content = runtime
+                .tool_runtime
+                .redactor()
+                .redact(&content)
+                .into_owned();
             // Claude synthesizes this denial when its process is interrupted.
             // Only Aether's independent stop evidence can override that wording.
             let cancelled_result = (is_error

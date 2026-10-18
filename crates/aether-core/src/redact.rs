@@ -14,10 +14,12 @@ pub struct Redactor {
     patterns: Vec<(Regex, &'static str)>,
 }
 
+const RULE_COUNT: usize = 19;
+
 static DEFAULT_PATTERNS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
     // One rule per key shape the distribution can hold: every credentialed
     // provider it ships, plus the tool-side shapes.
-    let rules: [(&str, &str); 10] = [
+    let rules: [(&str, &str); RULE_COUNT] = [
         (r"sk-ant-[A-Za-z0-9_\-]{8,}", "[REDACTED:anthropic_key]"),
         (r"sk-[A-Za-z0-9_\-]{16,}", "[REDACTED:api_key]"),
         (r"\bgsk_[A-Za-z0-9]{20,}", "[REDACTED:groq_key]"),
@@ -34,13 +36,46 @@ static DEFAULT_PATTERNS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(||
             "Bearer [REDACTED]",
         ),
         (
+            r"\beyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}",
+            "[REDACTED:jwt]",
+        ),
+        (
+            r#"(?i)\baws_?secret_?access_?key\b[\s"']*[=:][\s"']*[A-Za-z0-9/+=]{40}"#,
+            "[REDACTED:aws_secret_key]",
+        ),
+        (
+            r"\bxox[abposr]-[A-Za-z0-9\-]{10,}",
+            "[REDACTED:slack_token]",
+        ),
+        (r"\bglpat-[A-Za-z0-9_\-]{20,}", "[REDACTED:gitlab_token]"),
+        (
+            r"\b[sr]k_(?:live|test)_[A-Za-z0-9]{16,}",
+            "[REDACTED:stripe_key]",
+        ),
+        (r"\bnpm_[A-Za-z0-9]{30,}", "[REDACTED:npm_token]"),
+        (r"\bhf_[A-Za-z0-9]{30,}", "[REDACTED:huggingface_token]"),
+        (
             r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----",
+            "[REDACTED:private_key]",
+        ),
+        // Truncated captures: a tail that starts inside a key, or a key whose end was cut.
+        (
+            r"\A[A-Za-z0-9+/=\r\n ]*-----END [A-Z ]*PRIVATE KEY-----",
+            "[REDACTED:private_key]",
+        ),
+        (
+            r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*\z",
             "[REDACTED:private_key]",
         ),
     ];
     rules
         .iter()
-        .filter_map(|(re, rep)| Regex::new(re).ok().map(|r| (r, *rep)))
+        .map(|(re, rep)| {
+            // A rule that cannot compile must stop the process, not vanish.
+            #[allow(clippy::expect_used)]
+            let compiled = Regex::new(re).expect("a built-in redaction rule compiles");
+            (compiled, *rep)
+        })
         .collect()
 });
 
@@ -120,6 +155,48 @@ mod tests {
         assert!(out.contains("[REDACTED:anthropic_key]"));
         assert!(out.contains("Bearer [REDACTED]"));
         assert!(out.contains("[REDACTED:private_key]"));
+    }
+
+    #[test]
+    fn every_rule_compiles() {
+        assert_eq!(Redactor::default().patterns.len(), RULE_COUNT);
+    }
+
+    #[test]
+    fn masks_widened_shapes_and_leaves_controls() {
+        let r = Redactor::default();
+        let secrets = [
+            "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1r",
+            "aws_secret_access_key=wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY12",
+            "xoxb-123456789012-abcdefghijkl",
+            "glpat-abcdefghij0123456789",
+            "sk_live_abcdefghijklmnop0123",
+            "npm_abcdefghijklmnopqrstuvwxyz0123456789",
+            "hf_abcdefghijklmnopqrstuvwxyz0123456789",
+        ];
+        for secret in secrets {
+            let text = format!("value: {secret} end");
+            let out = r.redact(&text);
+            assert!(out.contains("[REDACTED"), "{secret} survived: {out}");
+            assert!(!out.contains(&secret[secret.len() - 12..]), "{out}");
+        }
+        for control in ["see hf_model docs", "task_live_run ok", "eyJ short", "xox"] {
+            assert_eq!(r.redact(control).as_ref(), control);
+        }
+    }
+
+    #[test]
+    fn masks_private_keys_cut_by_truncation() {
+        let r = Redactor::default();
+        let headless = "Zm9vYmFy\nYmF6cXV4\n-----END RSA PRIVATE KEY-----\nnext line";
+        let out = r.redact(headless);
+        assert!(
+            !out.contains("Zm9vYmFy") && out.contains("next line"),
+            "{out}"
+        );
+        let endless = "log\n-----BEGIN PRIVATE KEY-----\nZm9vYmFy\nYmF6cXV4";
+        let out = r.redact(endless);
+        assert!(!out.contains("Zm9vYmFy") && out.starts_with("log"), "{out}");
     }
 
     #[test]
