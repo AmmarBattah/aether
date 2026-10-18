@@ -2077,3 +2077,96 @@ mod feedback_cli_tests;
 
 #[path = "cli_regressions/events.rs"]
 mod events;
+
+#[test]
+fn closed_stdout_pipe_exits_without_panicking() {
+    let home = tempfile::tempdir().unwrap();
+    // `schema` needs no daemon; every command prints through the same panic hook.
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_aether"))
+        .arg("schema")
+        .env("HOME", home.path())
+        .env("XDG_DATA_HOME", home.path().join("data"))
+        .env("XDG_CONFIG_HOME", home.path().join("config"))
+        .env("XDG_RUNTIME_DIR", home.path())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    drop(child.stdout.take());
+    let output = child.wait_with_output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("panicked"), "{stderr}");
+    assert!(
+        matches!(output.status.code(), Some(0 | 141)),
+        "{:?}",
+        output.status
+    );
+}
+
+fn run_isolated(root: &std::path::Path, args: &[&str]) -> Output {
+    isolated_command(root, args)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn logout_rejects_unknown_providers_and_reports_nothing_removed() {
+    let root = tempfile::tempdir().unwrap();
+    let unknown = run_isolated(root.path(), &["logout", "nosuch"]);
+    assert!(!unknown.status.success());
+    let message = stderr(&unknown);
+    assert!(message.contains("unknown provider `nosuch`"), "{message}");
+    assert!(message.contains("openai"), "{message}");
+
+    let empty = run_isolated(root.path(), &["logout", "openai"]);
+    assert!(empty.status.success(), "{}", stderr(&empty));
+    assert!(
+        stdout(&empty).contains("nothing to remove"),
+        "{}",
+        stdout(&empty)
+    );
+    assert!(!stdout(&empty).contains("removed credentials"));
+}
+
+#[test]
+fn login_without_a_terminal_explains_what_is_needed() {
+    let root = tempfile::tempdir().unwrap();
+    let output = run_isolated(root.path(), &["login", "openai"]);
+    assert!(!output.status.success());
+    let message = stderr(&output);
+    assert!(
+        message.contains("terminal") && message.contains("--api-key"),
+        "{message}"
+    );
+    assert!(!message.contains("os error"), "{message}");
+}
+
+#[test]
+fn a_bad_config_is_reported_once_by_the_daemon_and_by_doctor() {
+    for config in ["[model\n", "bogus_key = 1\n"] {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("config")).unwrap();
+        std::fs::write(root.path().join("config/config.toml"), config).unwrap();
+
+        let daemon = run_isolated(root.path(), &["daemon", "--foreground"]);
+        let message = stderr(&daemon);
+        assert!(!daemon.status.success(), "{message}");
+        assert!(!message.contains("using default"), "{message}");
+        let key = if config.starts_with('[') {
+            "TOML parse error"
+        } else {
+            "bogus_key"
+        };
+        assert_eq!(message.matches(key).count(), 1, "{message}");
+
+        let doctor = run_isolated(root.path(), &["doctor"]);
+        assert_eq!(doctor.status.code(), Some(2), "{}", stderr(&doctor));
+        let report = stdout(&doctor);
+        let failures = report
+            .lines()
+            .filter(|l| l.starts_with("fail  config"))
+            .count();
+        assert_eq!(failures, 1, "{report}");
+    }
+}
