@@ -143,7 +143,10 @@ fn main() -> std::process::ExitCode {
                     eprintln!("writing JSON error: {write_error}");
                 }
             }
-            eprintln!("Error: {}", cli::error_message(&error));
+            // The JSON object already says it; a network failure is not repeated on stderr.
+            if !(json && cli::is_network_error(&error)) {
+                eprintln!("Error: {}", cli::error_message(&error));
+            }
             let backtrace = error.backtrace();
             if backtrace.status() == std::backtrace::BacktraceStatus::Captured {
                 eprintln!("\nStack backtrace:\n{backtrace}");
@@ -357,7 +360,7 @@ fn execute(args: Args, socket: PathBuf) -> anyhow::Result<i32> {
                 RunsCmd::Export { run, out, json } => cli::run_export(socket, run, out, json).await,
                 RunsCmd::Import { file, json } => cli::run_import(socket, file, json).await,
             },
-            Cmd::Agents { all, json } => cli::agents(endpoint, all, json).await,
+            Cmd::Agents { all, json } => cli::agents(endpoint, all, json, ascii).await,
             Cmd::New { name, model, json } => cli::new_agent(endpoint, name, model, json).await,
             Cmd::Tasks { json } => cli::tasks(endpoint, json).await,
             Cmd::Task {
