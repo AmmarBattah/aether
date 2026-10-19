@@ -231,6 +231,15 @@ or `wait_for` for a one-shot durable wake. The agent-facing scheduling tool
 does not yet expose every CLI scheduling mode. CLI schedule dates show whole
 seconds in UTC; JSON preserves timestamp precision.
 
+A tick that finds a delivery schedule's target paused is recorded as skipped
+("target is paused") and dropped. It does not count towards `--max-deliveries`,
+and nothing is replayed after `aether resume`; the same holds for a tick that
+finds the target busy under the default policy (`--queue-one` holds one trigger
+instead). `aether schedule list` ends a line with the number of skipped
+occurrences among the schedule's newest 1000 recorded, when there are any; `N+`
+means the scan was full, so older ones may exist too. `aether schedule history`
+lists them with their reasons.
+
 `aether serve` bridges signed incoming webhooks and outgoing event
 subscriptions. Use the `[serve]` section of the configuration template.
 Python, TypeScript, Rust, and MCP clients can drive the same daemon protocol;
@@ -257,6 +266,13 @@ aether runs list
 aether runs report RUN_ID --md
 aether runs export RUN_ID --out run.aether
 ```
+
+Whether a command starts the daemon depends on the command. `aether`, `tui`,
+`run`, `new`, `models`, `providers`, `auth`, `github-watcher` (even `status`) and
+`remote setup` start one when none is running. The other commands that talk to
+the daemon, such as `status`, `agents`, `tasks`, `send` and `schedule`, fail with
+"no daemon" instead. `doctor`, `schema`, `diagnose`, `bridge` and `voice` start
+none. `aether --help` says the same.
 
 Wherever a command takes an ID, a unique prefix of it works as well, with or
 without its `agt_`/`run_`/`tsk_`/`apr_`/`sch_` part. An agent or a schedule
