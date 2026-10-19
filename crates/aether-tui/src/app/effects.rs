@@ -74,6 +74,14 @@ pub enum Then {
     /// say which of them it was.
     MemoryMutated(MemoryAction),
     Models,
+    /// The notification center's list of open ones, asked for on connect.
+    Notifications,
+    /// Its resolved history, asked for once the open ones are in.
+    ResolvedNotifications,
+    /// Reply to marking a notification read or resolving it.
+    NotificationChanged,
+    /// Reply to answering a notification.
+    NotificationAnswered,
     Providers,
     Schedules,
     ScheduleChanged,
@@ -259,6 +267,8 @@ impl Then {
                 | Then::Approvals { .. }
                 | Then::Models
                 | Then::Auth
+                | Then::Notifications
+                | Then::ResolvedNotifications
         )
     }
 }

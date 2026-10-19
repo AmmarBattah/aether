@@ -117,6 +117,9 @@ impl App {
         if let Then::Backfill { agent, connection } = then {
             return Routed::Done(self.on_backfill(agent, connection, result));
         }
+        if then.is_notification() {
+            return Routed::Done(self.notification_reply(&then, result));
+        }
         if let Then::QueuedSent(agent) = then {
             self.queued_sent(agent, result.err());
             return Routed::Done(Vec::new());
