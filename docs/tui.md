@@ -568,6 +568,12 @@ List, popup, board navigation and approval keys stay fixed.
 | `Ctrl+G` | go to the agents board, opening it if hidden |
 | `Ctrl+B` | show / hide the agents board |
 | `Ctrl+O` | switch workspace: view its agent, or start one there |
+| `Alt+O` | files in the focused or latest message |
+| `Alt+E` | open the viewed file externally |
+| `Alt+W` | close the file viewer |
+| `Alt+Z` | toggle full screen file viewer |
+| `Alt+-` | narrow the file viewer |
+| `Alt+=` | widen the file viewer |
 | `Alt+N` | the notification center: answer, mark read, resolve, go to the chat |
 | `Alt+↑` | view the parent agent |
 | `Ctrl+T` | details: full outputs and reasoning |
@@ -842,3 +848,44 @@ it cannot erase or replay earlier output. Suppressed cells and streamed prefixes
 advance output cursors. Questions and approvals remain answerable, and output is
 sanitized as usual. Rendering caches the visible index and updates changed cells
 from a bounded journal, so unchanged frames do not rescan hidden history.
+
+## Local file viewer
+
+**Alt+O** lists local file references in the last clicked message, or the
+latest message when none is focused. Bare paths, Markdown links and local
+`file://` links are supported. Click a highlighted reference without dragging
+to open it; dragging continues to select text. The viewed agent's own
+workspace resolves relative paths, including a child's separate workspace.
+OSC 8 links are parsed when present in the original message; terminal control
+sequences are stripped before painting.
+Reference discovery examines the first 256 KiB of each message, with a shared
+256 KiB lookahead budget and at most 256 references, so malformed links cannot
+trigger repeated unbounded scans while output streams.
+
+The viewer starts at half width. **Alt+- / Alt+=** resize it, **Alt+Z** toggles
+full screen, and **Esc** (with the viewer focused) or **Alt+W** closes it. Narrow terminals show it full width.
+**Tab** switches focus and leaves full screen when returning to chat; arrows and PageUp/PageDown scroll while focused, and
+**Alt+E** opens the selected file through `xdg-open` (Linux) or `open` (macOS).
+Approvals retain priority. Closing the viewer does not stop the agent.
+Full screen blocks composer edits and pastes; **Tab** returns to chat.
+Completed dictation is retained for later insertion. **Ctrl+C** closes a
+full-screen viewer before it can clear the draft.
+
+PNG, JPEG, GIF (first frame) and WebP decode off the UI thread, as do text and
+Markdown layout. A startup terminal query, bounded to 200 ms, chooses Kitty,
+Sixel or iTerm2; no terminal-name guessing is used. Missing pixel cell metrics
+or an unsupported terminal falls back to coloured Unicode half blocks.
+Through tmux and SSH, unsupported or unanswered probes also fall back; no
+passthrough configuration is changed. An SSH-connected remote agent shows a
+notice rather than reading a same-named local path. There are no URL fetches.
+
+Image inputs are limited to 20 MiB, 8 million pixels and a 64 MiB decoder
+allocation budget; rendering is capped separately. UTF-8 text inputs are
+limited to 1 MiB, with a preview of up to 64 KiB / 4,000 lines. Terminal
+controls are stripped. Only one decode runs at a time; rapid resize requests
+coalesce. A canonical path outside the workspace requires a second Enter
+before reading. Native protocol encodings are cached until the preview
+changes. Markdown uses existing styles; language-specific syntax highlighting
+is deferred. PDF, HTML and SVG offer **Alt+E** to open externally; in-pane PDF and
+HTML rendering are planned follow-ups. HTML scripts are never executed by the
+TUI.

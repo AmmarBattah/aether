@@ -20,7 +20,11 @@ impl App {
             return Dispatch::Handled(self.paste_key(image_only));
         }
         // An open view or search has the keys; what it ignored is not typing.
-        if self.board.focused() || !self.bottom.view_stack.is_empty() || self.search_focused() {
+        if self.board.focused()
+            || !self.bottom.view_stack.is_empty()
+            || self.search_focused()
+            || crate::viewer::hides_composer(self)
+        {
             return Dispatch::Handled(Vec::new());
         }
         if let Some(op) = edit_op(&self.keys, key) {

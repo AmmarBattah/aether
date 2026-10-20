@@ -84,6 +84,9 @@ impl App {
         self.input.image_reads = self.input.image_reads.saturating_sub(1);
         debug_assert!(self.input.images.len() <= MAX_IMAGES_PER_MESSAGE);
         match content {
+            Ok(_) if crate::viewer::hides_composer(self) => {
+                self.flash("paste ignored: the file viewer is full screen (Tab returns to chat)");
+            }
             Ok(ClipboardContent::Image(image)) if self.paste_reaches_composer() => {
                 self.attach_image(image);
             }
@@ -128,6 +131,7 @@ impl App {
             && self.bottom.view_stack.is_empty()
             && self.bottom.find.is_none()
             && !self.search_focused()
+            && !crate::viewer::hides_composer(self)
     }
 
     /// Nothing lands in a draft the person cannot see; say what hides it.
@@ -148,6 +152,9 @@ impl App {
         debug_assert!(self.input.image_reads > 0, "an image nothing asked for");
         self.input.image_reads = self.input.image_reads.saturating_sub(1);
         match image {
+            Ok(_) if crate::viewer::hides_composer(self) => {
+                self.flash("image not attached: return to chat before pasting");
+            }
             Ok(image) => self.attach_image(image),
             Err(reason) => self.flash_error(format!("no image attached: {reason}")),
         }
