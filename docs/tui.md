@@ -22,7 +22,7 @@ transcript of the viewed agent                     │ board (Ctrl+G)
 • Working (1m 12s • esc to interrupt)              │ inspector of the agent
 › Steer aether                                     │ under the cursor
 opus-5.5 high · ~/aether · aether                  │
-? shortcuts · ctrl+g agents   $0.51 · 82% context left
+? shortcuts · ctrl+g agents   $0.51 · 82% until compaction
 ```
 
 From the top:
@@ -51,8 +51,10 @@ From the top:
   as a breadcrumb (`child ‹ parent`). Items drop right to left as the
   terminal narrows.
 - **Hint row.** Key hints on the left (hidden while you type); run cost and
-  the context left on the right. Short confirmations such as `effort high`
-  replace the hints for a moment. When the row is tight, `82% context left`
+  the context left before compaction on the right (measured against where the
+  agent compacts, 256K for Claude, 272K for Codex, else three quarters of the
+  window; `[models.compaction_tokens]` overrides it). Short confirmations such
+  as `effort high` replace the hints for a moment. When the row is tight, `82% until compaction`
   shortens to `82%`, then cost and context drop whole; a figure is never cut.
   On a focused board the Enter, Esc and lifecycle keys come first, so at the
   100-column dock only `82%` fits (nothing with `--ascii`); the inspector's
@@ -545,8 +547,10 @@ On Unix, Ctrl+Z suspends the TUI after restoring the terminal. Use your shell's
 `/compact` and `aether compact AGENT_ID` fold older context without requesting
 an assistant reply. Pending messages still receive replies once the agent's
 wait lets them through; a waiting agent returns to its wait. Empty context or a
-failed compactor produces a notice without a reply call; successful compaction
-still uses the configured compactor. An agent's `request_checkpoint` tool keeps
+failed compactor produces a notice without a reply call. A Claude Code agent
+runs Claude Code's own `/compact` in its session; other agents use the
+configured compactor. The transcript shows the fold while it runs, then who
+folded it, the token counts and how long it took. An agent's `request_checkpoint` tool keeps
 its normal continuation, and changing models preserves handoff compaction.
 A request during a running turn waits for its next context assembly.
 

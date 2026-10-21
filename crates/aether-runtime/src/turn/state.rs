@@ -89,6 +89,11 @@ pub(super) fn finish(runtime: &Runtime, ctx: &TurnCtx, next: Next) -> Result<()>
     let mut reap = None;
     let mut bench = None;
     let cancelled = matches!(next, Next::Cancelled(_));
+    // Asked for while the turn ran: fold now rather than at the next message.
+    let owed_by = match compaction_pending(runtime, ctx.agent.id)? {
+        Some(CompactionTrigger::Explicit { by }) => Some(by),
+        _ => None,
+    };
     match next {
         Next::Ready => {
             agent.transition(AgentStatus::Ready, at)?;
@@ -120,7 +125,10 @@ pub(super) fn finish(runtime: &Runtime, ctx: &TurnCtx, next: Next) -> Result<()>
                 invocation,
                 next: AgentStatusKind::Waiting,
             }));
-            commit.push_mutation(Mutation::UpsertAgent(agent));
+            match owed_by {
+                Some(by) => runtime.ready_for_compaction(&hold, &mut commit, &mut agent, by)?,
+                None => commit.push_mutation(Mutation::UpsertAgent(agent)),
+            }
         }
         Next::Completed(summary) => {
             commit.push_event(ctx.draft(EventKind::AgentTurnCompleted {
@@ -167,6 +175,7 @@ pub(super) fn finish(runtime: &Runtime, ctx: &TurnCtx, next: Next) -> Result<()>
                 invocation,
                 next: AgentStatusKind::Waiting,
             }));
+            // An operator stop stands: an owed fold waits for the next turn.
             commit.push_mutation(Mutation::UpsertAgent(agent));
         }
         Next::Suspended(cause) => {
