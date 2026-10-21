@@ -22,7 +22,13 @@ impl SqliteStore {
             family_page_sql(filter, after, before, limit, ascending, &mut args)
         } else {
             page_sql(
-                "body", &predicate, after, before, limit, ascending, &mut args,
+                "seq, id, agent_id, body, type, parent_agent_id, run",
+                &predicate,
+                after,
+                before,
+                limit,
+                ascending,
+                &mut args,
             )
         };
         let mut conn = self.read_conn();
@@ -30,7 +36,7 @@ impl SqliteStore {
         // pruning between statements. No write is performed by this transaction.
         let tx = conn.transaction()?;
         let refs: Vec<&dyn rusqlite::ToSql> = args.iter().map(|arg| arg.as_ref()).collect();
-        let events: Vec<Event> = Self::read_many(&tx, &sql, &refs)?;
+        let events = read_events(&tx, &sql, &refs)?;
         let mut lower = after + 1;
         let mut upper = before.map_or(i64::MAX as u64, |seq| (seq - 1).min(i64::MAX as u64));
         if events.len() == limit
@@ -64,6 +70,40 @@ impl SqliteStore {
     }
 }
 
+fn read_events(
+    conn: &Connection,
+    sql: &str,
+    params: &[&dyn rusqlite::ToSql],
+) -> Result<Vec<Event>> {
+    let mut statement = conn.prepare(sql)?;
+    let mut rows = statement.query(params)?;
+    let mut events = Vec::new();
+    while let Some(row) = rows.next()? {
+        let seq: i64 = row.get(0)?;
+        let id: String = row.get(1)?;
+        let owner: Option<String> = row.get(2)?;
+        let body: String = row.get(3)?;
+        let event: Event = serde_json::from_str(&body)?;
+        let kind: String = row.get(4)?;
+        let parent: Option<String> = row.get(5)?;
+        let run: Option<String> = row.get(6)?;
+        if seq < 0
+            || event.seq != seq as u64
+            || event.id.to_string() != id
+            || event.agent_id.map(|id| id.to_string()) != owner
+            || event.kind.type_name() != kind
+            || event.parent_agent_id.map(|id| id.to_string()) != parent
+            || event.run.map(|id| id.to_string()) != run
+        {
+            return Err(StoreError::Corrupt(format!(
+                "Event {seq} has a mismatched sequence, identity, type or ownership; run `aether doctor` and `aether diagnose`"
+            )));
+        }
+        events.push(event);
+    }
+    Ok(events)
+}
+
 /// One page of an agent's events and its children's. Each indexed branch is
 /// bounded first and merged on `seq` alone: OR, or a UNION of bodies, sorts them all.
 pub(super) fn family_page_sql(
@@ -87,7 +127,7 @@ pub(super) fn family_page_sql(
     );
     let order = if ascending { "ASC" } else { "DESC" };
     format!(
-        "SELECT body FROM events WHERE seq IN (SELECT seq FROM ({own}) UNION SELECT seq FROM ({child})) ORDER BY seq {order} LIMIT ?{}",
+        "SELECT seq, id, agent_id, body, type, parent_agent_id, run FROM events WHERE seq IN (SELECT seq FROM ({own}) UNION SELECT seq FROM ({child})) ORDER BY seq {order} LIMIT ?{}",
         args.len()
     )
 }

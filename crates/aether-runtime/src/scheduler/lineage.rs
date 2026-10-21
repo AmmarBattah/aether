@@ -1,4 +1,4 @@
-use crate::{Result, SchedulerState};
+use crate::SchedulerState;
 use aether_core::{agent::Agent, id::AgentId};
 use std::collections::{HashMap, HashSet};
 
@@ -6,12 +6,13 @@ use std::collections::{HashMap, HashSet};
 pub(super) struct Lineage {
     parents: HashMap<AgentId, AgentId>,
     caps: HashMap<AgentId, usize>,
+    unreadable: HashSet<AgentId>,
 }
 
 impl Lineage {
     /// Load only missing ancestors, not the entire historical fleet. Finished
     /// intermediates remain part of the tree and cannot release ancestor caps.
-    pub(super) fn from_store(live: &[Agent], store: &dyn aether_store::Store) -> Result<Self> {
+    pub(super) fn from_store(live: &[Agent], runtime: &crate::Runtime) -> Self {
         let mut lineage = Self::of(live);
         let mut seen: HashSet<_> = live.iter().map(|agent| agent.id).collect();
         let mut pending: Vec<_> = lineage.parents.values().copied().collect();
@@ -19,9 +20,17 @@ impl Lineage {
             if !seen.insert(id) {
                 continue;
             }
-            let agent = store.agent(id)?.ok_or_else(|| {
-                aether_store::StoreError::Corrupt(format!("missing ancestor {id}"))
-            })?;
+            let agent = match runtime.store.agent(id) {
+                Ok(Some(agent)) => agent,
+                failed => {
+                    runtime.report_problem(format!("ancestor.{id}"), format!(
+                        "Ancestor {id} cannot be read ({failed:?}); its descendants cannot run. Run `aether doctor` and `aether diagnose`."
+                    ));
+                    lineage.unreadable.insert(id);
+                    continue;
+                }
+            };
+            runtime.clear_problem(&format!("ancestor.{id}"));
             if let Some(parent) = agent.parent {
                 lineage.parents.insert(id, parent);
                 pending.push(parent);
@@ -30,7 +39,7 @@ impl Lineage {
                 lineage.caps.insert(id, cap);
             }
         }
-        Ok(lineage)
+        lineage
     }
 
     pub(super) fn of(live: &[Agent]) -> Self {
@@ -44,7 +53,11 @@ impl Lineage {
                 caps.insert(agent.id, cap);
             }
         }
-        Self { parents, caps }
+        Self {
+            parents,
+            caps,
+            unreadable: HashSet::new(),
+        }
     }
 
     /// Ancestors of `id`, nearest first.
@@ -59,6 +72,12 @@ impl Lineage {
             cursor = *parent;
         }
         out
+    }
+
+    pub(super) fn has_unreadable_ancestor(&self, id: AgentId) -> bool {
+        self.ancestors(id)
+            .iter()
+            .any(|id| self.unreadable.contains(id))
     }
 
     /// Whether some ancestor's cap is already met by its running descendants.

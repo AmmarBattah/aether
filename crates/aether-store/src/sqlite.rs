@@ -21,6 +21,7 @@ mod devices;
 mod engine_sessions;
 mod event_queries;
 mod history_retention;
+mod quarantine;
 pub use history_retention::RunExpiry;
 mod ledger;
 mod memories;

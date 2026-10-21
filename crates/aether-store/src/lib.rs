@@ -538,9 +538,22 @@ pub struct ImportedArtifact {
     pub publication: Option<StagedArtifact>,
 }
 
+/// A malformed stored record, preserved in place for diagnosis and repair.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RecordQuarantine {
+    pub table: String,
+    pub id: String,
+    pub reason: String,
+}
+
 /// The storage contract. Synchronous by design: SQLite work is short and the
 /// daemon wraps calls in blocking tasks where it matters.
 pub trait Store: Send + Sync {
+    /// Persisted notices for malformed records encountered during reads.
+    fn quarantines(&self) -> Result<Vec<RecordQuarantine>> {
+        Ok(Vec::new())
+    }
+
     /// Explicit ownership evidence, including sessions whose agent history has expired.
     fn engine_session_ownerships(&self) -> Result<Vec<EngineSessionOwnership>>;
 

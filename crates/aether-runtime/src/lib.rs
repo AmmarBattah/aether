@@ -32,6 +32,7 @@ pub mod scheduler;
 pub mod schedules;
 pub mod storage;
 pub mod submission;
+pub mod supervision;
 mod tool_interruption;
 pub mod transfer;
 pub mod turn;
@@ -308,6 +309,8 @@ pub struct Runtime {
     pub(crate) seeded_repositories: parking_lot::Mutex<std::collections::HashSet<AgentId>>,
     /// Free space on the store's filesystem, as the disk guard last saw it.
     pub(crate) disk: parking_lot::Mutex<disk::DiskState>,
+    problems: parking_lot::RwLock<std::collections::BTreeMap<String, String>>,
+    recovery_failed: std::sync::atomic::AtomicBool,
     workspace_gc_cursor: parking_lot::Mutex<workspace_gc::WorkspaceGcCursor>,
     workspace_gc_active: parking_lot::Mutex<Option<std::path::PathBuf>>,
 }
@@ -418,6 +421,8 @@ impl Runtime {
             started_at: now(),
             commit_lock,
             artifact_lock: tokio::sync::Mutex::new(()),
+            problems: Default::default(),
+            recovery_failed: std::sync::atomic::AtomicBool::new(false),
             workspace_gc_cursor: Default::default(),
             workspace_gc_active: Default::default(),
             storage_gc_lock: parking_lot::Mutex::new(()),
@@ -432,18 +437,61 @@ impl Runtime {
                 pid: std::process::id(),
             },
         )))?;
-        recovery::recover(&runtime)?;
+        let recovered =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| recovery::recover(&runtime)))
+                .unwrap_or_else(|panic| {
+                    Err(RuntimeError::Invalid(format!(
+                        "startup recovery panicked: {}; run `aether doctor`",
+                        turn::panic_message(panic.as_ref())
+                    )))
+                });
+        if let Err(error) = recovered {
+            runtime
+                .recovery_failed
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            runtime.report_problem("startup recovery".into(), format!(
+                "Startup recovery could not establish safe cancellation or resource ownership: {error}. New turns are withheld. Run `aether doctor` and `aether diagnose`, repair the reported state, then restart with `aether stop` and `aether daemon`."
+            ));
+        }
         // Preserve startup artifact cleanup. Periodic retention runs on a
         // separate blocking worker, never inside the scheduler tick loop.
-        match runtime.sweep_artifacts() {
+        let cleanup =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| runtime.sweep_artifacts()))
+                .unwrap_or_else(|panic| {
+                    Err(RuntimeError::Invalid(format!(
+                        "startup artifact cleanup panicked: {}",
+                        turn::panic_message(panic.as_ref())
+                    )))
+                });
+        match cleanup {
             Ok(0) => {}
             Ok(n) => tracing::info!(evicted = n, "retention dropped artifact bytes"),
-            Err(e) => tracing::error!(error = %e, "artifact retention sweep failed"),
+            Err(error) => runtime.report_problem("retention.artifacts".into(), format!(
+                "Startup artifact cleanup failed: {error}; periodic maintenance will retry. Run `aether doctor` and `aether diagnose`."
+            )),
         }
         disk::spawn(runtime.clone());
         scheduler::spawn(runtime.clone());
         retention::spawn(runtime.clone());
         Ok(runtime)
+    }
+
+    pub fn report_problem(&self, key: String, detail: String) {
+        let mut problems = self.problems.write();
+        if problems.get(&key) != Some(&detail) {
+            tracing::error!(%key, %detail);
+            problems.insert(key, detail);
+        }
+    }
+
+    pub fn clear_problem(&self, key: &str) {
+        self.problems.write().remove(key);
+    }
+
+    pub fn problems(&self) -> Result<Vec<String>> {
+        let mut problems: Vec<_> = self.problems.read().values().cloned().collect();
+        problems.extend(self.store.quarantines()?.into_iter().map(|q| q.reason));
+        Ok(problems)
     }
 
     /// Replay a run from another daemon's export, then publish. Like

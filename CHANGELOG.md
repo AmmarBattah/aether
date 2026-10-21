@@ -8,6 +8,12 @@ release is also the text of its GitHub release.
 
 ### Fixed
 
+- **Daemon recovery and diagnostics.** Damaged agent, task and lease records
+  are preserved with actionable quarantine notices. Recovery and background
+  task failures no longer stop unrelated work or the local serving loop.
+  `aether status` and `aether doctor` show recovery problems and the latest
+  persistent panic or fatal-error record; a prior crash is announced once
+  at the next startup.
 - **Resource hygiene (#240).** Workspace GC no longer keeps reporting a
   discarded workspace whose directory is gone, and `aether send` warns on
   stderr above 256 KiB and recommends an artifact; the message is still sent.

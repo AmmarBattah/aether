@@ -12,10 +12,12 @@ use crate::{NotificationFilter, Result, StoreError};
 pub(crate) const MAX_NOTIFICATIONS_READ: usize = 1000;
 
 pub(super) fn put(tx: &Transaction<'_>, notification: &Notification) -> Result<()> {
-    assert!(
-        !notification.title.trim().is_empty(),
-        "a notification is checked before it is stored"
-    );
+    if notification.title.trim().is_empty() {
+        return Err(StoreError::Corrupt(format!(
+            "Notification {} has an empty title; run `aether doctor`",
+            notification.id
+        )));
+    }
     tx.execute(
         "INSERT INTO notifications(id, source, key, state, updated_at, body)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)
@@ -129,11 +131,15 @@ fn read_filtered(conn: &Connection, filter: &NotificationFilter) -> Result<Vec<N
         out.push(decode(&id, &body)?);
     }
     debug_assert!(out.len() <= limit);
-    debug_assert!(
-        out.iter()
-            .all(|n| filter.states.is_empty() || filter.states.contains(&n.state)),
-        "the state filter held"
-    );
+    if let Some(record) = out
+        .iter()
+        .find(|n| !filter.states.is_empty() && !filter.states.contains(&n.state))
+    {
+        return Err(StoreError::Corrupt(format!(
+            "notification {} body disagrees with its indexed state; run `aether doctor`",
+            record.id
+        )));
+    }
     Ok(out)
 }
 

@@ -40,18 +40,29 @@ pub(crate) use wake::{has_transcript_work, has_unread_inbox, has_work, urgent_in
 use wake::{park, person_message_pending, person_reaches, satisfied_wait_note, wake, wake_reason};
 
 pub(crate) fn spawn(runtime: Arc<Runtime>) {
+    let supervising = runtime.clone();
     tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                _ = runtime.notify.notified() => {}
-                _ = tokio::time::sleep(Duration::from_secs(1)) => {}
-                _ = runtime.shutdown.cancelled() => break,
-            }
-            if let Some(Err(e)) = contained(&runtime, "tick", || tick(&runtime)) {
-                tracing::error!(error = %e, "scheduler tick failed");
-            }
-        }
+        crate::supervision::restart(
+            "scheduler",
+            supervising.shutdown.clone(),
+            |detail| supervising.report_problem("background.scheduler".into(), detail),
+            || run(runtime.clone()),
+        )
+        .await;
     });
+}
+
+async fn run(runtime: Arc<Runtime>) {
+    loop {
+        tokio::select! {
+            _ = runtime.notify.notified() => {}
+            _ = tokio::time::sleep(Duration::from_secs(1)) => {}
+            _ = runtime.shutdown.cancelled() => break,
+        }
+        if let Some(Err(e)) = contained(&runtime, "tick", || tick(&runtime)) {
+            tracing::error!(error = %e, "scheduler tick failed");
+        }
+    }
 }
 
 /// A fault the tests inject into a named step.
@@ -84,7 +95,7 @@ fn contained<T>(
                 sched.step_panics += 1;
                 sched.step_panics
             };
-            tracing::error!(step, panic = %detail, total, "scheduler step panicked");
+            runtime.report_problem(format!("scheduler.{step}"), format!("Scheduler step {step} panicked ({total} panics): {detail}; it will retry. Run `aether doctor` and `aether diagnose`."));
             None
         }
     }
@@ -126,9 +137,12 @@ fn isolated(
     run: impl FnOnce() -> Result<()>,
 ) -> bool {
     match contained(runtime, step, run) {
-        Some(Ok(())) => true,
+        Some(Ok(())) => {
+            runtime.clear_problem(&format!("scheduler.{step}"));
+            true
+        }
         Some(Err(e)) => {
-            tracing::error!(step, error = %e, "scheduler step failed");
+            runtime.report_problem(format!("scheduler.{step}"), format!("Scheduler step {step} failed: {e}; it will retry. Run `aether doctor` and `aether diagnose`."));
             faults.errors.push(e);
             false
         }
@@ -152,6 +166,12 @@ fn guarded(
 /// One scheduling pass. Public for tests. Every step runs even when an
 /// earlier one failed; the first failure is returned once the pass is done.
 pub fn tick(runtime: &Arc<Runtime>) -> Result<()> {
+    if runtime
+        .recovery_failed
+        .load(std::sync::atomic::Ordering::Relaxed)
+    {
+        return Ok(());
+    }
     let mut faults = Faults::default();
     pass(runtime, &mut faults)?;
     match faults.errors.into_iter().next() {
@@ -161,94 +181,44 @@ pub fn tick(runtime: &Arc<Runtime>) -> Result<()> {
 }
 
 fn pass(runtime: &Arc<Runtime>, faults: &mut Faults) -> Result<()> {
-    guarded(runtime, faults, "drain cancellations", || {
+    let cancelling = crate::cancellation::pending_agents(runtime)?;
+    isolated(runtime, faults, "drain cancellations", || {
         crate::cancellation::drain(runtime)
     });
     isolated(runtime, faults, "expire backoff", || {
         expire_backoff(runtime)
     });
+    let mut blocked = std::collections::HashSet::new();
+    let mut record_errors = Vec::new();
     guarded(runtime, faults, "enforce budgets", || {
-        enforce_budgets(runtime)
+        enforce_budgets(runtime, &mut blocked, &mut record_errors)
     });
-    let live = live_after_enforcement(runtime, faults)?;
-    let lineage = Lineage::from_store(&live, runtime.store.as_ref())?;
+    let live = live_after_enforcement(runtime, faults, &mut blocked, &mut record_errors)?;
+    let lineage = Lineage::from_store(&live, runtime);
     let mut ready: Vec<Runnable> = Vec::new();
     let at = now();
     let canaries = due_canaries(runtime, &live, at);
     for agent in live {
         // VISION §3.8: a paused agent receives no turns; its inbox fills.
-        if agent.paused {
+        if agent.paused
+            || cancelling.contains(&agent.id)
+            || blocked.contains(&agent.id)
+            || lineage.has_unreadable_ancestor(agent.id)
+        {
             continue;
         }
-        let woken = match &agent.status {
-            // Limit 1 outranks the gate: a person's words reach an agent the
-            // scheduler is holding back, and the gate re-applies after the
-            // reply turn.
-            AgentStatus::Blocked { reason } if person_reaches(runtime, &agent, reason)? => wake(
-                runtime,
-                agent,
-                "message from the user".to_owned(),
-                None,
-                None,
-            )?,
-            // The probe is the interrupted turn itself: Ready is all it needs,
-            // because the user message it never answered is already committed.
-            AgentStatus::Blocked {
-                reason: BlockReason::Exhausted { model, .. },
-            } if canaries.get(&model.provider) == Some(&agent.id) => {
-                let (provider, id) = (model.provider.clone(), agent.id);
-                if !providers::claim_canary(runtime, &provider, id) {
-                    continue;
-                }
-                let woken = wake(
-                    runtime,
-                    agent,
-                    format!("probing {provider} after exhaustion"),
-                    None,
-                    None,
-                );
-                if !matches!(&woken, Ok(Some(_))) {
-                    runtime.sched.lock().probing.remove(&provider);
-                }
-                woken?
+        let id = agent.id;
+        let result = record_work(|| prepare_agent(runtime, agent, &canaries));
+        match result {
+            Ok(candidate) => {
+                runtime.clear_problem(&format!("scheduler.agent.{id}"));
+                ready.extend(candidate);
             }
-            AgentStatus::Waiting { condition } => {
-                let oracle = RuntimeOracle {
-                    runtime,
-                    agent: agent.id,
-                    inbox_cursor: agent.inbox_cursor,
-                };
-                if condition.is_satisfied(&oracle) {
-                    let reason = wake_reason(condition, &oracle);
-                    let note = satisfied_wait_note(runtime, &agent, condition, &oracle)?;
-                    wake(runtime, agent, reason, None, note)?
-                } else if !condition.involves_approval()
-                    && let Some(reason) = urgent_inbox(runtime, &agent)?
-                {
-                    // Sleeping never means deaf: a person, this agent's own
-                    // parent, or a failure gets through, and the wait is
-                    // restored after the turn.
-                    let interrupted = condition.clone();
-                    wake(runtime, agent, reason, Some(interrupted), None)?
-                } else {
-                    None
-                }
-            }
-            AgentStatus::Ready => {
-                if has_work(runtime, &agent)? {
-                    Some(agent)
-                } else {
-                    park(runtime, agent)?;
-                    None
-                }
-            }
-            _ => None,
-        };
-        if let Some(agent) = woken {
-            let addressed = person_message_pending(runtime, &agent)?;
-            ready.push(Runnable { agent, addressed });
+            Err(error) => runtime.report_problem(format!("scheduler.agent.{id}"), format!(
+                "Agent {id} could not be scheduled: {error}; it is withheld and will retry. Run `aether doctor` and `aether diagnose`.")),
         }
     }
+    faults.errors.extend(record_errors);
     // Even a person's message waits: every turn writes, and a disk this low
     // is about to refuse writes.
     if runtime.disk_is_low() {
@@ -261,8 +231,105 @@ fn pass(runtime: &Arc<Runtime>, faults: &mut Faults) -> Result<()> {
     Ok(())
 }
 
+fn record_work<T>(work: impl FnOnce() -> Result<T>) -> Result<T> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)).unwrap_or_else(|panic| {
+        Err(RuntimeError::Invalid(format!(
+            "record processing panicked: {}; run `aether doctor`",
+            crate::turn::panic_message(panic.as_ref())
+        )))
+    })
+}
+
+fn prepare_agent(
+    runtime: &Arc<Runtime>,
+    agent: Agent,
+    canaries: &std::collections::HashMap<String, aether_core::id::AgentId>,
+) -> Result<Option<Runnable>> {
+    let woken = match &agent.status {
+        // Limit 1 outranks the gate: a person's words reach an agent the
+        // scheduler is holding back, and the gate re-applies after the
+        // reply turn.
+        AgentStatus::Blocked { reason } if person_reaches(runtime, &agent, reason)? => wake(
+            runtime,
+            agent,
+            "message from the user".to_owned(),
+            None,
+            None,
+        )?,
+        // The probe is the interrupted turn itself: Ready is all it needs,
+        // because the user message it never answered is already committed.
+        AgentStatus::Blocked {
+            reason: BlockReason::Exhausted { model, .. },
+        } if canaries.get(&model.provider) == Some(&agent.id) => {
+            let (provider, id) = (model.provider.clone(), agent.id);
+            if !providers::claim_canary(runtime, &provider, id) {
+                return Ok(None);
+            }
+            let woken = wake(
+                runtime,
+                agent,
+                format!("probing {provider} after exhaustion"),
+                None,
+                None,
+            );
+            if !matches!(&woken, Ok(Some(_))) {
+                runtime.sched.lock().probing.remove(&provider);
+            }
+            woken?
+        }
+        AgentStatus::Waiting { .. } => wake_waiting(runtime, agent)?,
+        AgentStatus::Ready => {
+            if has_work(runtime, &agent)? {
+                Some(agent)
+            } else {
+                park(runtime, agent)?;
+                None
+            }
+        }
+        _ => None,
+    };
+    if let Some(agent) = woken {
+        let addressed = person_message_pending(runtime, &agent)?;
+        return Ok(Some(Runnable { agent, addressed }));
+    }
+    Ok(None)
+}
+
+fn wake_waiting(runtime: &Runtime, agent: Agent) -> Result<Option<Agent>> {
+    let AgentStatus::Waiting { condition } = &agent.status else {
+        return Ok(None);
+    };
+    Ok({
+        let oracle = RuntimeOracle {
+            runtime,
+            agent: agent.id,
+            inbox_cursor: agent.inbox_cursor,
+        };
+        if condition.is_satisfied(&oracle) {
+            let reason = wake_reason(condition, &oracle);
+            let note = satisfied_wait_note(runtime, &agent, condition, &oracle)?;
+            wake(runtime, agent, reason, None, note)?
+        } else if !condition.involves_approval()
+            && let Some(reason) = urgent_inbox(runtime, &agent)?
+        {
+            // Sleeping never means deaf: a person, this agent's own
+            // parent, or a failure gets through, and the wait is
+            // restored after the turn.
+            let interrupted = condition.clone();
+            wake(runtime, agent, reason, Some(interrupted), None)?
+        } else {
+            None
+        }
+    })
+}
+
 /// Reuse the deadline snapshot unless enforcement or dependency gates changed it.
-fn live_after_enforcement(runtime: &Arc<Runtime>, faults: &mut Faults) -> Result<Vec<Agent>> {
+fn live_after_enforcement(
+    runtime: &Arc<Runtime>,
+    faults: &mut Faults,
+    blocked: &mut std::collections::HashSet<aether_core::id::AgentId>,
+    record_errors: &mut Vec<RuntimeError>,
+) -> Result<Vec<Agent>> {
     let watermark = runtime.store.commits();
     let filter = AgentFilter {
         live_only: true,
@@ -270,13 +337,13 @@ fn live_after_enforcement(runtime: &Arc<Runtime>, faults: &mut Faults) -> Result
     };
     let mut live = runtime.store.agents(&filter)?;
     guarded(runtime, faults, "enforce deadlines", || {
-        enforce_deadlines(runtime, &live)
+        enforce_deadlines(runtime, &live, blocked, record_errors)
     });
     isolated(runtime, faults, "fire schedules", || {
         crate::schedules::tick(runtime, now())
     });
     guarded(runtime, faults, "gate dependencies", || {
-        gate_dependencies(runtime)
+        gate_dependencies(runtime, blocked, record_errors)
     });
     if runtime.store.commits() != watermark {
         live = runtime.store.agents(&filter)?;
