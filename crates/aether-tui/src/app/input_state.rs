@@ -22,8 +22,25 @@ pub struct InputState {
     pub(crate) images: Vec<aether_core::attachment::ImageAttachment>,
     /// Images asked for and not yet read; a message waits for them.
     pub(crate) image_reads: usize,
+    /// Reads asked for by an agent no longer on screen; their results are dropped.
+    pub(crate) stale_reads: usize,
     pub(super) history: Vec<String>,
     pub(super) history_pos: Option<usize>,
+}
+
+/// What one agent's composer holds while another agent is on screen.
+#[derive(Debug, Default)]
+pub(crate) struct Draft {
+    text: String,
+    cursor: usize,
+    pastes: Vec<PastedText>,
+    images: Vec<aether_core::attachment::ImageAttachment>,
+}
+
+impl Draft {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.text.is_empty() && self.images.is_empty()
+    }
 }
 
 /// Effort levels in picker order, with a one-line description each.
@@ -36,6 +53,44 @@ pub const EFFORTS: &[(Effort, &str)] = &[
 ];
 
 impl InputState {
+    /// Fold a parked draft into the current one: its text (pastes included)
+    /// follows on a new line and its images join the chips.
+    pub(crate) fn absorb_draft(&mut self, parked: Draft) {
+        self.revision += 1;
+        self.history_pos = None;
+        self.images.extend(parked.images);
+        if parked.text.is_empty() {
+            return;
+        }
+        if !self.text.is_empty() {
+            self.text.push('\n');
+        }
+        let offset = self.text.len();
+        self.text.push_str(&parked.text);
+        for mut paste in parked.pastes {
+            paste.range = paste.range.start + offset..paste.range.end + offset;
+            self.pastes.push(paste);
+        }
+        assert!(self.pastes.iter().all(|p| p.range.end <= self.text.len()));
+        assert!(self.cursor <= self.text.len());
+    }
+
+    /// Swap the composer's draft for `other`, returning the draft that was in it.
+    pub(crate) fn swap_draft(&mut self, other: Draft) -> Draft {
+        assert!(
+            other.cursor <= other.text.len(),
+            "draft cursor past its text"
+        );
+        self.revision += 1;
+        self.history_pos = None;
+        Draft {
+            text: std::mem::replace(&mut self.text, other.text),
+            cursor: std::mem::replace(&mut self.cursor, other.cursor),
+            pastes: std::mem::replace(&mut self.pastes, other.pastes),
+            images: std::mem::replace(&mut self.images, other.images),
+        }
+    }
+
     /// Replace the whole text; cursor goes to the end.
     pub fn set_text(&mut self, text: impl Into<String>) {
         self.revision += 1;

@@ -349,6 +349,12 @@ impl App {
     }
 
     pub(super) fn submit_input(&mut self) -> Vec<Effect> {
+        if let Some(reason) = self.oversized_images() {
+            self.flash_error(format!(
+                "not sent: {reason}; remove some with Backspace at the start of the draft or /image --clear"
+            ));
+            return Vec::new();
+        }
         let text = self.input.take();
         self.dirty = true;
         let text = match self.parse_input(&text) {

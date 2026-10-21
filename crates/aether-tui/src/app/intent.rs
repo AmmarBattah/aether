@@ -47,6 +47,7 @@ impl App {
         if self.selected != Some(agent) {
             self.voice.selection += 1;
         }
+        self.swap_drafts(agent);
         self.selected = Some(agent);
         self.dirty = true;
         let mut effects: Vec<Effect> = self.backfill_request(agent).into_iter().collect();
@@ -57,6 +58,54 @@ impl App {
             });
         }
         effects
+    }
+
+    /// Nothing viewed: the composer's draft is parked with its agent, so
+    /// what is typed next belongs to whichever agent is shown or created next.
+    pub(super) fn clear_selection(&mut self) {
+        self.selected = None;
+        let Some(owner) = self.draft_owner.take() else {
+            return;
+        };
+        self.close_popup();
+        self.input.stale_reads += std::mem::take(&mut self.input.image_reads);
+        let outgoing = self.input.swap_draft(Default::default());
+        if !outgoing.is_empty() && !self.gone(owner) {
+            self.drafts.insert(owner, outgoing);
+        }
+    }
+
+    /// Park the composer's draft under its owner and bring back `agent`'s.
+    /// A draft typed while no agent owned the composer goes to `agent`.
+    fn swap_drafts(&mut self, agent: AgentId) {
+        if self.draft_owner == Some(agent) {
+            return;
+        }
+        self.close_popup();
+        let Some(leaving) = self.draft_owner else {
+            self.draft_owner = Some(agent);
+            let Some(parked) = self.drafts.remove(&agent) else {
+                return;
+            };
+            if self.input.text.is_empty() && self.input.images.is_empty() {
+                self.input.swap_draft(parked);
+                return;
+            }
+            let merged = !parked.is_empty();
+            self.input.absorb_draft(parked);
+            if merged {
+                self.flash("an earlier draft for this agent was added below what you typed");
+            }
+            return;
+        };
+        self.input.stale_reads += std::mem::take(&mut self.input.image_reads);
+        let incoming = self.drafts.remove(&agent).unwrap_or_default();
+        let outgoing = self.input.swap_draft(incoming);
+        if !outgoing.is_empty() {
+            self.drafts.insert(leaving, outgoing);
+        }
+        self.draft_owner = Some(agent);
+        debug_assert!(!self.drafts.contains_key(&agent));
     }
 
     /// A reply named `agent`, which the tree may not show yet: a tree
@@ -88,7 +137,7 @@ impl App {
         // Gone for a reason this client did not pick (another client, `--all-finished`):
         // cleared, then re-chosen below like any empty view.
         if self.selected.is_some_and(|id| self.gone(id)) {
-            self.selected = None;
+            self.clear_selection();
         }
         let first = self.intent == Intent::FirstTree;
         if first {

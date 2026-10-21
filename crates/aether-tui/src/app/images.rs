@@ -69,6 +69,9 @@ impl App {
     }
 
     pub(crate) fn paste_clipboard(&mut self) -> Vec<Effect> {
+        if self.refuse_while_stale_reads() {
+            return Vec::new();
+        }
         self.input.image_reads += 1;
         vec![Effect::PasteClipboard]
     }
@@ -77,6 +80,9 @@ impl App {
         &mut self,
         content: Result<ClipboardContent, String>,
     ) -> Vec<Effect> {
+        if self.drop_stale_read() {
+            return Vec::new();
+        }
         debug_assert!(
             self.input.image_reads > 0,
             "a clipboard read nothing asked for"
@@ -147,8 +153,32 @@ impl App {
         self.flash(format!("{outcome}: {reason}"));
     }
 
+    /// A read finishing after the operator moved to another agent belongs to
+    /// the old draft: drop it rather than attach it to the wrong agent.
+    fn drop_stale_read(&mut self) -> bool {
+        if self.input.stale_reads == 0 {
+            return false;
+        }
+        self.input.stale_reads -= 1;
+        self.flash("paste dropped: you switched agents while it was read; paste again");
+        true
+    }
+
+    /// Replies carry no owner, so while an old agent's reads are outstanding
+    /// no new read starts: every reply that arrives is then known to be stale.
+    fn refuse_while_stale_reads(&mut self) -> bool {
+        if self.input.stale_reads == 0 {
+            return false;
+        }
+        self.flash("a paste for the previous agent is still being read: try again in a moment");
+        true
+    }
+
     /// `Effect::AttachImage` finished.
     pub(crate) fn image_read(&mut self, image: Result<ImageAttachment, String>) {
+        if self.drop_stale_read() {
+            return;
+        }
         debug_assert!(self.input.image_reads > 0, "an image nothing asked for");
         self.input.image_reads = self.input.image_reads.saturating_sub(1);
         match image {
@@ -188,6 +218,24 @@ impl App {
         debug_assert!(self.input.images.len() <= MAX_IMAGES_PER_MESSAGE);
     }
 
+    /// Why the chips cannot leave as one message; merged drafts can exceed what `attach_image` allows.
+    pub(super) fn oversized_images(&self) -> Option<String> {
+        let images = &self.input.images;
+        if images.len() > MAX_IMAGES_PER_MESSAGE {
+            return Some(format!(
+                "a message takes at most {MAX_IMAGES_PER_MESSAGE} images ({} attached)",
+                images.len()
+            ));
+        }
+        let total = images.iter().map(ImageAttachment::size_bytes).sum::<u64>();
+        (total > MAX_MESSAGE_IMAGE_BYTES as u64).then(|| {
+            format!(
+                "the images of one message can total {} at most",
+                human_size(MAX_MESSAGE_IMAGE_BYTES as u64)
+            )
+        })
+    }
+
     /// `/image`: the clipboard image, a file, or `--clear`.
     pub(crate) fn run_image_command(&mut self, arg: ImageArg) -> Vec<Effect> {
         let typed = match arg {
@@ -218,6 +266,9 @@ impl App {
     }
 
     fn read_image(&mut self, source: ImageSource) -> Vec<Effect> {
+        if self.refuse_while_stale_reads() {
+            return Vec::new();
+        }
         self.input.image_reads += 1;
         vec![Effect::AttachImage(source)]
     }

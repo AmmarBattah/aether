@@ -382,3 +382,111 @@ show = ["user_text", "assistant_text", "question", "approval", "error"]
         }
     }
 }
+
+#[test]
+fn composer_draft_and_chips_stay_with_their_agent() {
+    let (mut app, first) = app_viewing(AgentStatus::Ready);
+    let second = AgentId::new();
+    app.input.set_text("for the first");
+    app.input.images.push(png("big.png"));
+
+    app.select(second);
+    assert_eq!(app.selected, Some(second));
+    assert!(app.input.text.is_empty(), "{:?}", app.input.text);
+    assert!(app.input.images.is_empty());
+
+    app.input.set_text("for the second");
+    app.select(first);
+    assert_eq!(app.input.text, "for the first");
+    assert_eq!(app.input.images.len(), 1);
+    assert_eq!(app.input.cursor, "for the first".len());
+
+    app.select(second);
+    assert_eq!(app.input.text, "for the second");
+    assert!(app.input.images.is_empty());
+}
+
+#[test]
+fn reads_finishing_after_an_agent_switch_do_not_attach_to_the_new_agent() {
+    let (mut app, first) = app_viewing(AgentStatus::Ready);
+    let second = AgentId::new();
+    app.paste_clipboard_image();
+    app.select(second);
+    app.image_read(Ok(png("late.png")));
+    assert!(app.input.images.is_empty());
+    assert_eq!(app.input.image_reads, 0);
+    app.select(first);
+    assert!(app.input.images.is_empty());
+}
+
+#[test]
+fn a_draft_survives_the_selection_passing_through_nothing() {
+    let (mut app, first) = app_viewing(AgentStatus::Ready);
+    app.input.set_text("first draft");
+    app.clear_selection();
+    assert!(app.input.text.is_empty());
+    app.select(first);
+    assert_eq!(app.input.text, "first draft");
+}
+
+#[test]
+fn no_read_starts_while_an_old_agents_read_is_outstanding() {
+    let (mut app, _first) = app_viewing(AgentStatus::Ready);
+    app.paste_clipboard_image();
+    app.select(AgentId::new());
+    assert!(app.paste_clipboard_image().is_empty());
+    assert!(app.paste_clipboard().is_empty());
+    assert_eq!(app.input.image_reads, 0);
+    app.image_read(Ok(png("late.png")));
+    assert!(app.input.images.is_empty());
+    assert_eq!(app.paste_clipboard_image().len(), 1);
+    assert_eq!(app.input.image_reads, 1);
+}
+
+#[test]
+fn text_typed_while_a_new_root_is_awaited_goes_to_that_root() {
+    let (mut app, first) = app_viewing(AgentStatus::Ready);
+    app.input.set_text("first draft");
+    app.clear_selection();
+    assert!(app.input.text.is_empty());
+    app.input.set_text("for the new root");
+    let root = AgentId::new();
+    app.select(root);
+    assert_eq!(app.input.text, "for the new root");
+    app.select(first);
+    assert_eq!(app.input.text, "first draft");
+}
+
+#[test]
+fn adopting_an_unowned_draft_merges_the_agents_parked_one() {
+    let (mut app, first) = app_viewing(AgentStatus::Ready);
+    app.input.set_text("parked");
+    for n in 0..MAX_IMAGES_PER_MESSAGE {
+        app.input.images.push(png(&format!("parked{n}.png")));
+    }
+    app.clear_selection();
+    app.input.set_text("typed meanwhile");
+    app.input.images.push(png("typed.png"));
+    app.select(first);
+    assert_eq!(app.input.text, "typed meanwhile\nparked");
+    assert_eq!(app.input.images.len(), MAX_IMAGES_PER_MESSAGE + 1);
+    assert!(app.submit_input().is_empty(), "too many images do not send");
+    assert_eq!(app.input.text, "typed meanwhile\nparked");
+    app.select(AgentId::new());
+    app.select(first);
+    assert_eq!(app.input.text, "typed meanwhile\nparked");
+}
+
+#[test]
+fn merged_images_over_the_byte_limit_do_not_send_or_lose_the_draft() {
+    let (mut app, _first) = app_viewing(AgentStatus::Ready);
+    let big = ImageAttachment {
+        data: "A".repeat(aether_core::attachment::MAX_MESSAGE_IMAGE_BYTES * 4 / 3 / 2 + 8),
+        ..png("big.png")
+    };
+    app.input.set_text("keep me");
+    app.input.images.extend([big.clone(), big]);
+    assert!(app.submit_input().is_empty());
+    assert_eq!(app.input.text, "keep me");
+    assert_eq!(app.input.images.len(), 2);
+}
