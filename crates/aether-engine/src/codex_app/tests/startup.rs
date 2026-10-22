@@ -736,3 +736,80 @@ async fn a_refused_thread_resume_proves_prompt_was_not_submitted() {
     drop(driver);
     child.wait().await.unwrap();
 }
+
+#[tokio::test]
+async fn the_session_event_lists_the_tools_the_mcp_inventory_offered() {
+    let replies = vec![
+        json!({}),
+        json!({"thread": {"id": "th"}, "model": "gpt-x"}),
+        json!({"data": [{"name": "aether", "runtimeStatus": "connected",
+            "tools": {"fail_task": {}, "delegate": {}}}]}),
+        json!({"turn": {"id": "tu"}}),
+    ];
+    let (requests, running, events) = handshake(turn(None, false), None, replies).await;
+    assert!(running);
+    assert_eq!(
+        methods(&requests),
+        [
+            "initialize",
+            "thread/start",
+            "mcpServerStatus/list",
+            "turn/start"
+        ]
+    );
+    let sessions: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event {
+            EngineEvent::Session { id, model, tools } => Some((id, model, tools)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sessions.len(), 1, "{events:?}");
+    let (id, model, tools) = sessions[0];
+    assert_eq!((id.as_str(), model.as_deref()), ("th", Some("gpt-x")));
+    assert!(!tools.iter().any(|tool| tool == "complete_task"));
+    assert_eq!(tools.len(), 2);
+}
+
+#[tokio::test]
+async fn an_unusable_inventory_still_records_the_session_before_refusing() {
+    let replies = vec![
+        json!({}),
+        json!({"thread": {"id": "th"}}),
+        json!({"data": []}),
+    ];
+    let (_, running, events) = handshake(turn(None, false), None, replies).await;
+    assert!(!running);
+    assert!(events.iter().any(
+        |e| matches!(e, EngineEvent::Session { id, tools, .. } if id == "th" && tools.is_empty())
+    ));
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, EngineEvent::Done(o) if o.is_error))
+    );
+}
+
+#[tokio::test]
+async fn an_inventory_rpc_error_still_records_the_session_before_failing() {
+    let replies = vec![
+        json!({"result": {}}),
+        json!({"result": {"thread": {"id": "th"}}}),
+        json!({"error": {"code": -1, "message": "boom"}}),
+    ];
+    let (_, running, events) = handshake_responses(
+        turn(None, false),
+        None,
+        replies,
+        Some(EngineVersion::new(0, 162, 0)),
+    )
+    .await;
+    assert!(!running);
+    let session = events
+        .iter()
+        .position(|e| matches!(e, EngineEvent::Session { id, .. } if id == "th"));
+    let done = events
+        .iter()
+        .position(|e| matches!(e, EngineEvent::Done(o) if o.is_error));
+    assert!(session.is_some() && session < done, "{events:?}");
+}

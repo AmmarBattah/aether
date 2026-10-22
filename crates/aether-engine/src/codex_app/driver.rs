@@ -60,6 +60,8 @@ pub(super) struct Driver {
     turn_submitted: bool,
     mcp_poll: bool,
     mcp_cursors: HashSet<String>,
+    /// The model of a thread whose session event waits for the tool list; `None` once emitted.
+    pending_session_model: Option<Option<String>>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -144,6 +146,7 @@ impl Driver {
             turn_submitted: false,
             mcp_poll: false,
             mcp_cursors: HashSet::new(),
+            pending_session_model: None,
         }
     }
 
@@ -412,29 +415,22 @@ impl Driver {
                     return false;
                 }
                 self.state.thread_id = Some(thread_id.clone());
-                let model = result["model"].as_str().map(str::to_owned);
-                if !self
-                    .emit(EngineEvent::Session {
-                        id: thread_id.clone(),
-                        model,
-                        tools: Vec::new(),
-                    })
-                    .await
-                {
+                self.pending_session_model = Some(result["model"].as_str().map(str::to_owned));
+                if self.state.turn.mcp.is_some() {
+                    return self
+                        .request(
+                            Sent::McpTools,
+                            "mcpServerStatus/list",
+                            json!({"threadId": thread_id}),
+                        )
+                        .await;
+                }
+                if !self.emit_session(&thread_id, Vec::new()).await {
                     return false;
                 }
-                if self.state.turn.mcp.is_some() {
-                    self.request(
-                        Sent::McpTools,
-                        "mcpServerStatus/list",
-                        json!({"threadId": thread_id}),
-                    )
-                    .await
-                } else {
-                    let params =
-                        turn_params(&self.state.turn, &thread_id, self.loopback_note_in_effect);
-                    self.request(Sent::TurnStart, "turn/start", params).await
-                }
+                let params =
+                    turn_params(&self.state.turn, &thread_id, self.loopback_note_in_effect);
+                self.request(Sent::TurnStart, "turn/start", params).await
             }
             Sent::McpTools => {
                 let tools = match mcp_inventory(result) {
@@ -462,6 +458,10 @@ impl Driver {
                         return false;
                     }
                 };
+                let thread_id = self.state.thread_id.clone().unwrap_or_default();
+                if !self.emit_session(&thread_id, tools.clone()).await {
+                    return false;
+                }
                 if !self
                     .emit(EngineEvent::Note(format!(
                         "Aether MCP tools ready: {}",
@@ -471,7 +471,6 @@ impl Driver {
                 {
                     return false;
                 }
-                let thread_id = self.state.thread_id.clone().unwrap_or_default();
                 let params =
                     turn_params(&self.state.turn, &thread_id, self.loopback_note_in_effect);
                 self.request(Sent::TurnStart, "turn/start", params).await
@@ -646,6 +645,16 @@ impl Driver {
         self.stdin.flush().await.is_ok()
     }
 
+    async fn emit_session(&mut self, thread_id: &str, tools: Vec<String>) -> bool {
+        let model = self.pending_session_model.take().flatten();
+        self.emit(EngineEvent::Session {
+            id: thread_id.to_owned(),
+            model,
+            tools,
+        })
+        .await
+    }
+
     async fn emit(&mut self, event: EngineEvent) -> bool {
         self.events.send(event).await.is_ok()
     }
@@ -655,6 +664,19 @@ impl Driver {
             return;
         }
         self.state.done = true;
+        // A thread that failed before its tool list arrived must stay resumable.
+        if let Some(model) = self.pending_session_model.take()
+            && let Some(id) = self.state.thread_id.clone()
+        {
+            let _ = self
+                .events
+                .send(EngineEvent::Session {
+                    id,
+                    model,
+                    tools: Vec::new(),
+                })
+                .await;
+        }
         let _ = self
             .events
             .send(EngineEvent::Done(EngineOutcome {
