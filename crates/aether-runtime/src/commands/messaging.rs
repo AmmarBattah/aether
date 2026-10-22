@@ -73,6 +73,31 @@ fn refers_to_each(content: &[ContentBlock], images: &[CheckedImage]) -> bool {
     })
 }
 
+/// Refuses a message whose text the engine could not take in one record.
+pub(crate) fn check_content_size(content: &[ContentBlock]) -> Result<()> {
+    let bytes: usize = content
+        .iter()
+        .map(|block| match block {
+            ContentBlock::Text { text } => text.len(),
+            _ => 0,
+        })
+        .sum();
+    check_text_size("message", bytes)
+}
+
+/// Refuses a JSON payload that renders into an engine record above the limit.
+pub(crate) fn check_payload_size(what: &str, payload: &serde_json::Value) -> Result<()> {
+    let bytes = serde_json::to_vec(payload)
+        .map_err(|e| RuntimeError::Invalid(format!("{what} is not serializable: {e}")))?
+        .len();
+    check_text_size(what, bytes)
+}
+
+/// [`aether_core::limits::check_text_size`] as the runtime's refusal.
+pub(crate) fn check_text_size(what: &str, bytes: usize) -> Result<()> {
+    aether_core::limits::check_text_size(what, bytes).map_err(RuntimeError::Invalid)
+}
+
 impl Runtime {
     /// Deliver a message to an agent's inbox. Waking is the scheduler's job.
     pub fn send_message(
@@ -108,6 +133,7 @@ impl Runtime {
         from: Actor,
         submission: Option<Submission>,
     ) -> Result<MessageId> {
+        check_text_size("message", text.len())?;
         // Unheld, ahead of megabytes to decode; the held check is the guarantee.
         if let Some(outcome) = self.recorded_submission(submission.as_ref())? {
             return sent_message(outcome);
@@ -126,6 +152,7 @@ impl Runtime {
         submission: Option<Submission>,
     ) -> Result<MessageId> {
         debug_assert!(refers_to_each(&content, images), "an image nobody is sent");
+        check_content_size(&content)?;
         // Before the liveness read, keyed or not: a recipient ending in
         // between would otherwise get a delivery committed after its end.
         let hold = self.hold();
@@ -162,6 +189,7 @@ impl Runtime {
                 "only an operator can reply to a question".into(),
             ));
         }
+        check_content_size(&content)?;
         let hold = self.hold();
         if let Some(outcome) = self.replayed_submission(&hold, submission.as_ref())? {
             return sent_message(outcome);
@@ -284,6 +312,7 @@ impl Runtime {
         from: Actor,
         submission: Option<Submission>,
     ) -> Result<Vec<MessageDelivery>> {
+        check_text_size("message", text.len())?;
         // Unheld, ahead of megabytes to decode; the held check is the guarantee.
         if let Some(outcome) = self.recorded_submission(submission.as_ref())? {
             return fanned_out(outcome);
@@ -302,6 +331,7 @@ impl Runtime {
         submission: Option<Submission>,
     ) -> Result<Vec<MessageDelivery>> {
         debug_assert!(refers_to_each(&content, images), "an image nobody is sent");
+        check_content_size(&content)?;
         let at = now();
         // One hold over every read and the commit they feed: a delivery
         // batch is all-or-nothing, so a seq claimed underneath it would drop
@@ -412,6 +442,8 @@ impl Runtime {
                 "trigger source may not contain the operator marker".into(),
             ));
         }
+        check_payload_size("trigger payload", &payload)?;
+        check_text_size("trigger source", source.len())?;
         let at = now();
         // Before the liveness read, as in `send_message_keyed`.
         let hold = self.hold();

@@ -26,6 +26,11 @@ const CHASES: u32 = 8;
 /// at 4 KiB pages.
 const LONG_WAL_FRAMES: i64 = 16_384;
 
+/// A fully copied WAL above this many frames (8 MiB at 4 KiB pages) is
+/// truncated: a passive pass reuses the file but never shrinks it, so one
+/// large write would leave its peak size on disk for good.
+const TRUNCATE_FRAMES: i64 = 2_048;
+
 /// Stops and joins the checkpoint thread on drop.
 pub(super) struct Checkpointer {
     stop: Option<mpsc::Sender<()>>,
@@ -40,6 +45,9 @@ impl Checkpointer {
             path,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
+        // Truncating takes the writer lock: never wait for it, so a reader
+        // that still holds the WAL costs one retry and not a stalled commit.
+        conn.busy_timeout(Duration::ZERO)?;
         let (stop, stopped) = mpsc::channel::<()>();
         let thread = std::thread::Builder::new()
             .name("sqlite-checkpoint".into())
@@ -89,6 +97,10 @@ fn run(conn: &Connection, stopped: &mpsc::Receiver<()>, interval: Duration) {
             continue;
         }
         chases = 0;
+        if wal.copied >= wal.frames && wal.frames > TRUNCATE_FRAMES {
+            truncate_wal(conn);
+            continue;
+        }
         let behind = overlapped || wal.copied < wal.frames;
         let long = behind && wal.frames > LONG_WAL_FRAMES;
         if long && !warned {
@@ -117,4 +129,18 @@ fn checkpoint(conn: &Connection) -> Result<Wal> {
         })
     })?;
     Ok(wal)
+}
+
+/// Shrink the fully copied WAL file to nothing. The connection has no busy
+/// timeout, so it gives up at once when a writer or reader is in the way; the
+/// WAL stays as long as it is and the next pass tries again.
+fn truncate_wal(conn: &Connection) {
+    let result = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+        row.get::<_, i64>(0)
+    });
+    match result {
+        Ok(0) => {}
+        Ok(_) => tracing::debug!("WAL truncate found the database busy; retrying next interval"),
+        Err(error) => tracing::warn!(%error, "WAL truncate failed; retrying next interval"),
+    }
 }
