@@ -6,6 +6,16 @@ release is also the text of its GitHub release.
 
 ## Unreleased
 
+### Changed
+
+- `aether daemon --help` and `aether serve --help` print their help again.
+- `aether run` takes `--token-budget`, `--cost-budget` and `--max-turns`, and
+  keeps replies of separate turns on separate lines.
+- `aether schedule create --target` no longer needs `--payload`; pause, resume
+  and cancel print one summary line.
+- `aether diagnose` writes `aether-diagnose-<time>` when `--out` is left out.
+- `aether version` prints the version and protocol version.
+
 ### Fixed
 
 - An engine turn whose model request is never answered no longer hangs for
