@@ -7,6 +7,7 @@ use crate::{
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::{
+    io::Write,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
 };
@@ -414,11 +415,29 @@ fn chromium_runs_offline_on_a_sandboxed_copy() {
     assert!(!page.contains("<script>"));
 }
 
+/// A skipped isolation test fails in CI when CI must run it, and is loud anywhere else.
+fn skip_isolation_test(reason: &str, required_in_ci: bool) {
+    assert!(
+        !(required_in_ci && std::env::var_os("CI").is_some()),
+        "CI must run this test: {reason}"
+    );
+    // Written past libtest's capture, which would hide an eprintln! of a passing test.
+    writeln!(
+        std::io::stderr(),
+        "\n*** SKIPPED the Chromium isolation test: {reason} ***\n"
+    )
+    .unwrap();
+}
+
 /// Every local-file and network route the page tries must stay blank in the screenshot.
 #[test]
 fn chromium_screenshot_cannot_read_local_files_or_reach_the_network() {
     let Some(chromium) = Tools::detect().chromium else {
-        eprintln!("skipped: headless Chromium is not installed");
+        // The Linux runner image ships Chromium; macOS keeps Chrome off PATH.
+        skip_isolation_test(
+            "headless Chromium is not installed",
+            cfg!(target_os = "linux"),
+        );
         return;
     };
     let dir = tempfile::tempdir().unwrap();
@@ -446,7 +465,13 @@ fn chromium_screenshot_cannot_read_local_files_or_reach_the_network() {
          <script>document.body.style.background='#f00'</script></body></html>"
     );
     std::fs::write(root.join("page.html"), &page).unwrap();
-    let png = html::screenshot(&chromium, page.as_bytes(), (800, 600)).unwrap();
+    let png = match html::screenshot(&chromium, page.as_bytes(), (800, 600)) {
+        Err(error) if error.to_string() == html::SANDBOX_UNAVAILABLE => {
+            skip_isolation_test(&error.to_string(), true);
+            return;
+        }
+        result => result.unwrap(),
+    };
     let shot = image::load_from_memory(&png).unwrap().into_rgb8();
     let red = shot
         .pixels()
@@ -474,6 +499,36 @@ fn chromium_screenshot_cannot_read_local_files_or_reach_the_network() {
         &app.viewer.preview,
         Some(Ok(Preview::Image { .. }))
     ));
+}
+
+#[test]
+fn a_chromium_without_a_usable_sandbox_says_so_instead_of_dumping_its_crash() {
+    let (dir, mut app) = setup(&[("page.html", b"<h1>Heading</h1>")]);
+    let chromium = script(
+        dir.path(),
+        "chromium",
+        "echo '[1:1:FATAL:zygote_host_impl_linux.cc:130] No usable sandbox! If you are running \
+         on Ubuntu 23.10+ ...' >&2\necho 'base::debug::CollectStackTrace()' >&2\nexit 134",
+    );
+    let mut documents = Documents::new(Tools {
+        chromium: Some(chromium),
+        ..Tools::default()
+    });
+    open(&mut app, &mut documents, "page.html");
+    let effects = key(&mut app, KeyCode::Char('t'), KeyModifiers::ALT);
+    load(&mut app, &mut documents, effects);
+    let Some(Ok(Preview::Failed { error, .. })) = &app.viewer.preview else {
+        panic!("{:?}", app.viewer.preview)
+    };
+    assert_eq!(error, html::SANDBOX_UNAVAILABLE);
+    assert!(pane(&app).contains("Chromium's sandbox could not start"));
+    let other = script(dir.path(), "chromium-other", "echo 'bad flag' >&2\nexit 1");
+    let error = html::screenshot(&other, b"<p>x</p>", (800, 600)).unwrap_err();
+    assert!(
+        format!("{error:#}").contains("chromium-other failed"),
+        "{error:#}"
+    );
+    assert!(format!("{error:#}").contains("bad flag"), "{error:#}");
 }
 
 #[test]
