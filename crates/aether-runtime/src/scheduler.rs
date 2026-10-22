@@ -18,6 +18,7 @@ use std::{sync::Arc, time::Duration};
 mod budgets;
 mod dependencies;
 mod dispatch;
+mod hard_stop;
 mod lineage;
 mod providers;
 mod wake;
@@ -29,6 +30,7 @@ use budgets::{enforce_budgets, enforce_deadlines};
 use dependencies::gate_dependencies;
 use dispatch::dispatch;
 pub(crate) use dispatch::{claim_link, hold_after_entry_refusal};
+use hard_stop::enforce_hard_stops;
 use lineage::Lineage;
 pub(crate) use lineage::{CapHolder, cap_holder, on_provider_descendants};
 pub(crate) use providers::{
@@ -219,15 +221,15 @@ fn pass(runtime: &Arc<Runtime>, faults: &mut Faults) -> Result<()> {
         }
     }
     faults.errors.extend(record_errors);
+    // Before the dispatch gates below: a held run's turns stop even when no
+    // new turn may start.
+    let mut reserve = enforce_hard_stops(runtime)?;
     // Even a person's message waits: every turn writes, and a disk this low
     // is about to refuse writes.
-    if runtime.disk_is_low() {
-        return Ok(());
+    if !runtime.disk_is_low() && !faults.withhold_dispatch {
+        dispatch(runtime, ready, &lineage, &mut reserve);
     }
-    if faults.withhold_dispatch {
-        return Ok(());
-    }
-    dispatch(runtime, ready, &lineage);
+    reserve.finish(runtime);
     Ok(())
 }
 
