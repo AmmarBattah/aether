@@ -82,7 +82,7 @@ pub(super) async fn steer(
     steering.handed(pending);
     // What did not fit this line follows as soon as the engine takes input.
     steering.retry = more_queued;
-    ctx.user_reply_pending |= from_user;
+    crate::turn::reply_obligation::owe(ctx, from_user);
     Ok(())
 }
 
@@ -163,24 +163,28 @@ pub(super) fn record_consumed(
 ) -> Result<()> {
     // Acceptance orders the message after any text still arriving for the
     // previous input. A reply emitted before this point cannot answer it.
-    ctx.user_reply_pending |= pending.from_user;
+    crate::turn::reply_obligation::owe(ctx, pending.from_user);
     ctx.agent.inbox_cursor = ctx.agent.inbox_cursor.max(pending.up_to);
     ctx.agent.updated_at = now();
     let hold = runtime.hold();
     let row = crate::turn::agent_row(runtime, ctx, &hold)?;
-    runtime.apply_held(
-        hold,
-        Commit::new()
-            .event(ctx.draft(EventKind::AgentMessage {
-                role: MessageRole::User,
-                content: pending.message.content,
-                invocation: None,
-            }))
-            .event(ctx.draft(EventKind::InboxConsumed {
-                up_to: pending.up_to,
-                items: pending.ids,
-            }))
-            .mutate(Mutation::UpsertAgent(row)),
-    )?;
+    let mut commit = Commit::new()
+        .event(ctx.draft(EventKind::AgentMessage {
+            role: MessageRole::User,
+            content: pending.message.content,
+            invocation: None,
+        }))
+        .event(ctx.draft(EventKind::InboxConsumed {
+            up_to: pending.up_to,
+            items: pending.ids,
+        }))
+        .mutate(Mutation::UpsertAgent(row));
+    if pending.from_user {
+        commit.push_event(crate::turn::reply_obligation::owed_draft(
+            ctx,
+            pending.up_to,
+        ));
+    }
+    runtime.apply_held(hold, commit)?;
     Ok(())
 }
