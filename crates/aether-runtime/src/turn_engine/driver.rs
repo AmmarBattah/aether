@@ -120,6 +120,41 @@ fn event_may_start_request(event: &EngineEvent) -> bool {
     )
 }
 
+/// Begin the wind-down for the end a harness action just recorded.
+#[allow(clippy::too_many_arguments)]
+fn begin_park(
+    runtime: &Runtime,
+    agent: aether_core::id::AgentId,
+    effects: &ToolEffects,
+    background: &BTreeSet<String>,
+    input: &mut Option<mpsc::Sender<aether_engine::EngineInput>>,
+    stop: Option<&mpsc::Sender<std::time::Duration>>,
+    engine_cancel: &CancellationToken,
+    fired: mpsc::Sender<()>,
+    await_reply: bool,
+) -> Park {
+    debug_assert!(effects.parked(), "no harness action ended the turn");
+    debug_assert!(!await_reply || !effects.terminal());
+    let grace = park_grace(
+        &effects.next,
+        !background.is_empty(),
+        runtime.config.engine_park_grace,
+    );
+    start_park(
+        agent,
+        grace,
+        background,
+        input,
+        // Preserve the native final response and usage receipt after
+        // terminal task tools. The bounded park timer still stops an
+        // unresponsive engine.
+        stop.filter(|_| !effects.terminal()),
+        engine_cancel,
+        fired,
+        await_reply,
+    )
+}
+
 fn failed_launch(
     error: aether_engine::EngineError,
     pricing: TurnPricing,
@@ -255,6 +290,11 @@ pub(super) async fn drive(
     let mut park: Option<Park> = None;
     let mut park_reply: Option<(String, serde_json::Value)> = None;
     let mut native_wait: Option<super::native_wait::NativeWait> = None;
+    // A Codex wait that arrived before any job was reported, held back until
+    // a command its batch started reports in or the settle bound passes;
+    // then released to be served.
+    let mut deferred: Option<(EngineRequest, tokio::time::Instant)> = None;
+    let mut released: Option<EngineRequest> = None;
     // The park's stop runs on its own timer (`Park::arm_stop`); this is only
     // how the loop learns that it fired.
     let (stop_fired_tx, mut stop_fired_rx) = mpsc::channel::<()>(1);
@@ -278,12 +318,13 @@ pub(super) async fn drive(
             .as_ref()
             .is_some_and(|wait| wait.ready(runtime, ctx))
             && let Some(wait) = native_wait.take()
-            && let Some((input, reply)) =
-                wait.finish("a message arrived or the requested condition was satisfied")
+            && let Some((tool, input, reply)) =
+                wait.release(runtime, ctx, &mut steering, effects)?
         {
-            state.remember_bridge_reply("wait_for".into(), input, reply);
+            state.remember_bridge_reply(tool, input, reply);
         }
         let native_deadline = native_wait.as_ref().and_then(|wait| wait.deadline());
+        let settle_by = deferred.as_ref().map(|(_, by)| *by);
         let accounting_deadline = state.accounting.deadline();
         // Something else owns the clock while a tool runs, the engine owes
         // an answer to background work, or the turn is winding down.
@@ -293,7 +334,8 @@ pub(super) async fn drive(
             || park.is_some()
             || reap_grace.is_some()
             || question.is_some()
-            || native_wait.is_some();
+            || native_wait.is_some()
+            || deferred.is_some();
         let stall_deadline = watchdog.deadline(waiting);
         tokio::select! {
             () = tokio::time::sleep_until(stall_deadline.unwrap_or_else(tokio::time::Instant::now)), if stall_deadline.is_some() => {
@@ -321,6 +363,9 @@ pub(super) async fn drive(
                     && let Some((input, reply)) = wait.finish("the requested deadline was reached") {
                     state.remember_bridge_reply("wait_for".into(), input, reply);
                 }
+            }
+            () = tokio::time::sleep_until(settle_by.unwrap_or_else(tokio::time::Instant::now)), if settle_by.is_some() => {
+                released = deferred.take().map(|(req, _)| req);
             }
             () = tokio::time::sleep_until(accounting_deadline.unwrap_or_else(tokio::time::Instant::now)), if accounting_deadline.is_some() => {
                 let commits_before = runtime.store.commits();
@@ -407,6 +452,7 @@ pub(super) async fn drive(
                     // any other input it controls.
                     let id = clamp(&id, MAX_ENGINE_NAME);
                     if !running && background.contains(&id)
+                        && native_wait.as_mut().is_some_and(|wait| wait.job_finished(&id))
                         && let Some(wait) = native_wait.take()
                         && let Some((input, reply)) = wait.finish(&format!("native background task {id} finished"))
                     {
@@ -418,6 +464,10 @@ pub(super) async fn drive(
                         } else {
                             tracing::warn!(agent = %ctx.agent.id, %id, "engine reported more background tasks than the turn tracks; not waiting on this one");
                         }
+                        // The command its batch started is live: serve the wait now.
+                        if let Some((req, _)) = deferred.take() {
+                            released = Some(req);
+                        }
                     } else if background.remove(&id) && background.is_empty() {
                         // The last result a parked turn was waiting for is
                         // in. Whatever the engine learns from it may no
@@ -428,6 +478,21 @@ pub(super) async fn drive(
                         {
                             park.stop_now(&engine_cancel);
                             reap_grace = Some(ReapGrace::start());
+                        } else if park.is_none()
+                            && native_wait.as_ref().is_some_and(|wait| wait.is_held())
+                            && let Some(wait) = native_wait.take()
+                        {
+                            // Nothing is left to keep attached: the held action parks.
+                            let replied = wait.into_park(effects).map(|(tool, input, reply)| {
+                                state.remember_bridge_reply(tool.clone(), input.clone(), reply);
+                                (tool, input)
+                            });
+                            park_reply = replied.filter(|_| engine.kind() == super::EngineKind::CLAUDE_CODE && stop.is_some());
+                            let started = begin_park(runtime, ctx.agent.id, effects, &background, &mut input, stop.as_ref(), &engine_cancel, stop_fired_tx.clone(), park_reply.is_some());
+                            if started.killed() {
+                                reap_grace = Some(ReapGrace::start());
+                            }
+                            park = Some(started);
                         }
                     }
                 }
@@ -604,16 +669,34 @@ pub(super) async fn drive(
                     break o;
                 }
             }
-            req = req_rx.recv() => {
+            next = async {
+                match released.take() {
+                    Some(req) => Some((req, true)),
+                    None => req_rx.recv().await.map(|req| (req, false)),
+                }
+            }, if deferred.is_none() => {
                 touch_pending = true;
-                if let Some(req) = req {
+                if let Some((req, settled)) = next {
                     receipt_seen = false;
                     activity_seen = true;
                     // What the engine spent before it asked is on the record
                     // before whatever the request commits.
                     flush_accounting(runtime, ctx, &mut state.accounting)?;
-                    if native_wait.is_some() && req.name == "wait_for" {
-                        let _ = req.reply.send(("A native background wait is already pending in this session.".into(), true));
+                    // Codex reports a command only once it started, so a wait
+                    // sent in the same batch can arrive first.
+                    if !settled
+                        && engine.kind() == super::EngineKind::CODEX
+                        && background.is_empty()
+                        && park.is_none()
+                        && native_wait.is_none()
+                        && super::native_wait::parks_turn(&req.name, &req.input)
+                    {
+                        let by = tokio::time::Instant::now() + super::native_wait::JOB_START_SETTLE;
+                        deferred = Some((req, by));
+                        continue;
+                    }
+                    if let Some(refusal) = native_wait.as_ref().and_then(|wait| wait.refusal(&req.name, &req.input)) {
+                        let _ = req.reply.send((refusal.into(), true));
                         continue;
                     }
                     let name = req.name.clone();
@@ -683,19 +766,13 @@ pub(super) async fn drive(
                             // Let Claude acknowledge the MCP reply before interrupting;
                             // otherwise it substitutes a spurious user-rejection result.
                             park_reply = reply.filter(|_| !effects.terminal());
-                            let started = start_park(
+                            let started = begin_park(
+                                runtime,
                                 ctx.agent.id,
-                                park_grace(
-                                    &effects.next,
-                                    !background.is_empty(),
-                                    runtime.config.engine_park_grace,
-                                ),
+                                effects,
                                 &background,
                                 &mut input,
-                                // Preserve the native final response and usage
-                                // receipt after terminal task tools. The bounded
-                                // park timer still stops an unresponsive engine.
-                                stop.as_ref().filter(|_| !effects.terminal()),
+                                stop.as_ref(),
                                 &engine_cancel,
                                 stop_fired_tx.clone(),
                                 park_reply.is_some(),
@@ -710,8 +787,9 @@ pub(super) async fn drive(
             }
             // Nothing a person sends can reach a turn that is over: an answer
             // handed to a process about to be killed would be consumed and
-            // lost, so it stays in the inbox for the next turn.
-            msg = bus.recv(), if park.is_none() && (input.is_some() || question.is_some()) => {
+            // lost, so it stays in the inbox for the next turn. A pending
+            // native wait also wakes on a delivery, which may release it.
+            msg = bus.recv(), if park.is_none() && (input.is_some() || question.is_some() || native_wait.is_some()) => {
                 let delivered = match msg {
                     Ok(BusMessage::Event(ev)) => {
                         ev.agent_id == Some(ctx.agent.id)
@@ -728,6 +806,9 @@ pub(super) async fn drive(
                             Some(pending) => answer_question(runtime, ctx, decisions.as_ref(), request_id, pending, &mut steering, &engine_cancel).await?,
                             None => question = Some(request_id),
                         },
+                        // The engine is blocked on a held call: its reply
+                        // hands over what arrived.
+                        None if native_wait.as_ref().is_some_and(|wait| wait.is_held()) => {}
                         // Steering: what arrived goes to the engine at its next
                         // step instead of waiting for this turn to end.
                         None => steer(runtime, ctx, &mut steering, &mut input).await?,
