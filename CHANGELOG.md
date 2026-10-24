@@ -23,6 +23,12 @@ release is also the text of its GitHub release.
 
 - **Liveness in agent replies.** `get_agent` and `list_agents` replies carry
   `engine_alive` and `last_event_at`, additively (mengsig/archon#251).
+- **`delegate` takes an optional `idempotency_key`.** A caller that lost the
+  reply, for example to a client timeout, repeats the call with the same key
+  and arguments and gets the child the first call created instead of a second
+  one; the same key with different arguments is refused. Keys are scoped to
+  the calling agent and kept with the daemon's other submission keys for seven
+  days (mengsig/archon#252).
 
 ## 1.2.4
 
