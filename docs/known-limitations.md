@@ -63,6 +63,39 @@ looks like a boundary and is not one.
   with `aether remote revoke` and remove it from your Tailscale account.
 - **Tailscale HTTPS publishes machine names.** Enabling HTTPS certificates for
   a tailnet lists its machine names in public certificate-transparency logs.
+- **Secret masking is pattern-based and has gaps.** Aether masks known key
+  shapes and the secret values the daemon itself holds (listener token, MCP
+  `token_env` values, provider keys) in tool outcomes, stored tool-output
+  artifacts, `read_artifact` replies and exports. A secret in any other shape
+  is not recognized. Some copies stay raw by design: an artifact a client
+  publishes is stored as sent (masked on every read and export, not on disk),
+  the shell's output log in the agent's temp directory keeps the command's
+  output for the agent, and artifacts stored before 1.2.7 are masked only
+  when read or exported. A `read_artifact` page, a capped `ReadArtifact`
+  reply and a shell log line cut at its size cap move their cut off any
+  secret seen whole around it: a private key block, a token of any length
+  from where it starts, a bearer or AWS key name across blank space before
+  its value, and any other match within 16 KiB of the cut (or the longest
+  known secret, if longer). A `read_artifact` page looks back up to 1 MiB
+  for where a token, key block or key name began. Still open: a token,
+  private key block, or bearer or AWS key name that began more than 1 MiB
+  before a page (a name with over 1 MiB of blank space before its value
+  included), a single token longer than the shell log's 5 MiB cap, more
+  than 4 MiB of blank lines between a bearer or AWS key name and its value
+  in a shell log, and a known secret repeated back to back many times over,
+  whose matches can fall either way of a cut. Each can be split so that
+  neither part is recognized. Tool arguments are kept in the event log as
+  typed, because an approval answered later re-runs the call from
+  them; a run export masks them. For the same reason a native engine's
+  approved permission prompt gets its tool input back unmasked. A known secret
+  that matches part of the export format (a field name, tag or id) makes
+  `aether runs export` refuse rather than write a file that would not import
+  as it was. Approval and rule notes and rule revocation reasons are masked
+  when recorded; ones recorded before 1.2.7 are not. Messages, questions,
+  answers and cancel reasons that people and agents send are kept as written. A secret encoded more than once (base64, or
+  JSON nested inside JSON beyond what a tool's own rendering adds) is not
+  recognized. Native engine transcripts and model replies that repeat a secret
+  are outside this masking.
 - **The GitHub watcher turns repository text into agent work.** Who may
   trigger it is decided by repository permission, the operator logins you name
   and the allowlists described in the
@@ -109,7 +142,9 @@ looks like a boundary and is not one.
 - Delegated workspace cleanup preserves Git layouts it cannot safely prove,
   including reftable, config includes, alternate object databases, symlinked
   metadata, cross-worktree symbolic refs and parent-traversal `gitdir` pointers.
-  Ordinary linked source worktrees are supported. Broad ancestor scopes and
+  Ordinary linked source worktrees are supported, including one that has since
+  been removed, as long as its repository's common Git directory remains.
+  Broad ancestor scopes and
   `allowed_paths` permission alone do not establish workspace ownership;
   explicit workspace roots, manifest relationships and resource leases do.
 - Build output pruning deletes a declared directory outside the commit hold,
@@ -253,14 +288,24 @@ isolation depend on the installed engine version and the platform; see
   diagnostic details. Clean shutdown does not erase it. `SIGKILL`, power
   loss and failures that abort before the panic hook runs cannot be recorded.
   An unwinding task panic may be recorded even if the daemon keeps running.
-- After a hard kill of the daemon (`kill -9`, power loss) its engine
-  processes keep running until the next daemon start, which kills the process
-  group of every engine it recorded, but only while the recorded pid and
-  start time still match a live group leader. This needs Linux (it reads
-  `/proc`); on macOS nothing is recorded or reaped, and the orphans must be
-  stopped by hand. An engine's descendants that left its process group, or a
-  group whose leader had already exited, are not reaped then; on Linux they
-  are when their agent ends. A graceful stop leaves no engine running.
+- What a crash record cannot hold, the run mark can tell: the daemon writes
+  `aether.db.running.json` (its pid and start time) when it starts and removes
+  it when it stops cleanly. A start that finds it left behind writes
+  `aether.db.unclean.json`, and the doctor's `shutdown` check warns until the
+  next clean stop; with no daemon answering, a mark left behind is a warning
+  too. It says the run ended badly, not why.
+- After a hard kill of the daemon (`kill -9`, a crash) on Linux, its engine
+  processes die with it, along with every process still in an engine's
+  process group. A process an engine started that left its group (with
+  `setsid`, for one) keeps running until the next daemon start. That start
+  kills the process group of every engine it recorded, but only while the
+  recorded pid and start time still match a live group leader, plus every
+  process carrying a recorded engine's token. A descendant that cleared its
+  environment and left the group is reaped only when its agent ends. On macOS
+  there is no parent-death signal, no group watchdog, and nothing is recorded
+  or reaped, so the engines of a killed daemon keep running and must be
+  stopped by hand. A graceful stop
+  leaves no engine running.
 - When an agent ends, its engines' leftover processes are found by their
   environment tag and, with a user systemd, their scope
   ([agent processes](configuration.md#agent-processes)). This needs Linux. A

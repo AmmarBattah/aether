@@ -11,7 +11,7 @@ use aether_remote::Ended;
 use aether_runtime::RuntimeError;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc;
@@ -27,6 +27,7 @@ mod providers;
 mod push;
 mod remote_admin;
 mod resolution;
+mod starting;
 mod subscription;
 mod writer;
 #[cfg(test)]
@@ -41,6 +42,7 @@ const WRITER_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
 
 fn map_err(e: RuntimeError) -> ErrorReply {
     match e {
+        busy if busy.is_store_contended() => store_busy(&busy),
         RuntimeError::NotFound(what) => {
             ErrorReply::new(ErrorCode::NotFound, format!("{what} not found"))
         }
@@ -54,19 +56,35 @@ fn map_err(e: RuntimeError) -> ErrorReply {
         RuntimeError::Memory(aether_memory::MemoryError::NotFound(id)) => ErrorReply::not_found(id),
         RuntimeError::Transition(t) => ErrorReply::new(ErrorCode::InvalidTransition, t.to_string()),
         RuntimeError::Models(m) => ErrorReply::new(ErrorCode::Unavailable, m.to_string()),
+        starting @ RuntimeError::Starting(_) => {
+            ErrorReply::new(ErrorCode::Unavailable, starting.to_string())
+        }
         RuntimeError::Model(m) => ErrorReply::new(ErrorCode::Unavailable, m.to_string()),
         RuntimeError::Store(e) => store_err(e),
         other => ErrorReply::internal(other),
     }
 }
 
+/// Expired history carries its span; the writer turns it back into today's
+/// `NotFound` for a client whose hello did not list `features::HISTORY_EXPIRED`.
 fn store_err(e: aether_store::StoreError) -> ErrorReply {
     match e {
-        aether_store::StoreError::HistoryExpired { .. } => {
-            ErrorReply::new(ErrorCode::NotFound, e.to_string())
-        }
+        aether_store::StoreError::HistoryExpired {
+            first_seq,
+            last_seq,
+        } => ErrorReply::history_expired(first_seq, last_seq, e.to_string()),
+        busy if busy.is_contended() => store_busy(&busy),
         other => ErrorReply::internal(other),
     }
+}
+
+/// A lock another process held past the busy timeout: nothing is wrong with
+/// the request or the store, and the same request succeeds once it clears.
+fn store_busy(error: &dyn std::fmt::Display) -> ErrorReply {
+    ErrorReply::new(
+        ErrorCode::Unavailable,
+        format!("store busy: another process holds the database lock ({error}); retry shortly"),
+    )
 }
 
 /// Longest line accepted before the hello has been authorized. A hello is a
@@ -140,9 +158,19 @@ where
     // handshake picks it, so it is shared; hello stores it before the
     // welcome is queued, and nothing before the welcome needs translating.
     let version = Arc::new(AtomicU32::new(aether_protocol::PROTOCOL_VERSION));
+    // Whether the hello listed `features::HISTORY_EXPIRED`; shared the same way.
+    let history_expired = Arc::new(AtomicBool::new(false));
 
     let (auth_tx, auth_rx) = tokio::sync::watch::channel::<Option<AuthContext>>(None);
-    let writer = writer::run(write, out_rx, version.clone(), auth_rx);
+    let writer = writer::run(
+        write,
+        out_rx,
+        writer::Speaking {
+            version: version.clone(),
+            history_expired: history_expired.clone(),
+        },
+        auth_rx,
+    );
     tokio::pin!(writer);
 
     let connection_cancel = shutdown.child_token();
@@ -273,6 +301,13 @@ where
                             // cannot decode.
                             Ok(speaking) => {
                                 version.store(speaking, Ordering::SeqCst);
+                                history_expired.store(
+                                    hello
+                                        .features
+                                        .iter()
+                                        .any(|feature| feature == features::HISTORY_EXPIRED),
+                                    Ordering::SeqCst,
+                                );
                                 match policy.admit(hello) {
                                     Err(refusal) => {
                                         tokio::time::sleep(policy.refusal_delay()).await;
@@ -347,6 +382,8 @@ where
                                                     features::BUILD_CACHE.into(),
                                                     features::NOTES.into(),
                                                     features::NOTIFICATIONS.into(),
+                                                    features::SUBTREE_UPDATE.into(),
+                                                    features::HISTORY_EXPIRED.into(),
                                                 ],
                                                 daemon_protocol_version: Some(
                                                     aether_protocol::PROTOCOL_VERSION,
@@ -387,6 +424,19 @@ where
                     }
                     continue;
                 };
+                if let Err(refusal) =
+                    starting::await_startup_probes(&daemon, &frame.command, &connection_cancel)
+                        .await
+                {
+                    let refused = ServerFrame::Reply {
+                        id,
+                        result: Err(refusal),
+                    };
+                    if !send_frame(&out_tx, refused, &connection_cancel).await {
+                        break;
+                    }
+                    continue;
+                }
                 // Before any branch below: subscriptions and shutdown never
                 // reach dispatch, so a check there would not cover them.
                 let allowed = auth

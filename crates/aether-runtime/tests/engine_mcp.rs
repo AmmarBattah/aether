@@ -14,6 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aether_core::agent::{AgentConfig, AgentStatusKind, ApprovalPolicy, NetworkPolicy, Scope};
+use aether_core::approval::{RuleMatch, RuleScope};
 use aether_core::event::{Actor, EventKind};
 use aether_core::id::AgentId;
 use aether_core::mcp::McpServerState;
@@ -161,13 +162,14 @@ struct Harness {
 }
 
 async fn harness() -> Harness {
-    harness_with(None).await
+    harness_with(None, aether_tools::Redactor::default()).await
 }
 
 /// The same harness, optionally with an engine that panics as soon as the
-/// turn hands out its bridge credentials.
+/// turn hands out its bridge credentials, and masking with `redactor`.
 async fn harness_with(
     panic_credentials: Option<mpsc::UnboundedSender<BridgeCredentials>>,
+    redactor: aether_tools::Redactor,
 ) -> Harness {
     let manager = McpManager::new(
         vec![McpServerSpec {
@@ -224,6 +226,7 @@ async fn harness_with(
                 command: "/bin/true".into(),
                 socket: workspace_root.join("aetherd.sock"),
             }),
+            redactor,
             ..Default::default()
         },
         store.clone(),
@@ -541,6 +544,130 @@ async fn a_bridged_call_reaches_the_server_as_the_engines_own_agent() {
     }
 }
 
+/// The engine hands a bridged reply straight to its provider, so a server
+/// that quotes a known secret is masked before the reply leaves.
+#[tokio::test]
+async fn a_bridged_reply_quoting_a_known_secret_reaches_the_engine_masked() {
+    const KNOWN: &str = "fleet-token-0123456789abcdef";
+    let redactor = aether_tools::Redactor::with_known_secrets([KNOWN]).expect("compiles");
+    let mut h = harness_with(None, redactor).await;
+    start_agent(&h);
+    let bridge = h.ready.recv().await.expect("the turn started");
+
+    let (reply, is_error) = h
+        .runtime
+        .engine_tool(
+            bridge.agent,
+            &bridge.token,
+            "mcp__mock__echo_request".into(),
+            json!({"note": KNOWN}),
+        )
+        .await
+        .expect("answered");
+    assert!(!is_error, "{reply}");
+    assert!(!reply.contains(KNOWN), "{reply}");
+    assert!(reply.contains("[REDACTED:known_secret]"), "{reply}");
+
+    if let Some(finish) = h.finish.take() {
+        let _ = finish.send(());
+    }
+}
+
+/// A permission answer carries the input the engine is about to run, so an
+/// approved command keeps a secret it holds; a note is masked when recorded.
+#[tokio::test]
+async fn a_permission_answer_keeps_its_input_and_masks_denial_notes() {
+    const KNOWN: &str = "fleet-token-0123456789abcdef";
+    // Only ever written in a note, so any trace of it is a recorded note.
+    const NOTED: &str = "note-token-fedcba9876543210";
+    let redactor = aether_tools::Redactor::with_known_secrets([KNOWN, NOTED]).expect("compiles");
+    let mut h = harness_with(None, redactor).await;
+    let agent = start_agent(&h);
+    let bridge = h.ready.recv().await.expect("the turn started");
+    let prompt = |command: String| json!({"tool_name": "Bash", "input": {"command": command}, "tool_use_id": "tu-1"});
+
+    let (reply, is_error) = h
+        .runtime
+        .engine_tool(
+            bridge.agent,
+            &bridge.token,
+            "permission".into(),
+            prompt(format!("mkdir out && grep {KNOWN} notes.md")),
+        )
+        .await
+        .expect("answered");
+    assert!(!is_error, "{reply}");
+    let answer: serde_json::Value = serde_json::from_str(&reply).expect("a permission answer");
+    assert_eq!(answer["behavior"], "allow", "{reply}");
+    assert_eq!(
+        answer["updatedInput"]["command"],
+        format!("mkdir out && grep {KNOWN} notes.md"),
+        "the approved input runs as asked"
+    );
+
+    for (tool, input) in [
+        ("permission", prompt("curl -sI https://example.com".into())),
+        ("mcp__mock__write_note", json!({"key": "k", "text": "hi"})),
+    ] {
+        let calling = {
+            let runtime = h.runtime.clone();
+            let bridge = bridge.clone();
+            tokio::spawn(async move {
+                runtime
+                    .engine_tool(bridge.agent, &bridge.token, tool.into(), input)
+                    .await
+            })
+        };
+        let pending = wait_for_approval(h.store.as_ref()).await;
+        h.runtime
+            .resolve_approval(
+                pending.id,
+                ApprovalDecision::Denied,
+                Actor::user(),
+                Some(format!("not with {KNOWN} or {NOTED}")),
+                None,
+            )
+            .expect("deny");
+        let (reply, _) = calling.await.expect("join").expect("answered");
+        assert!(!reply.contains(KNOWN), "{tool}: {reply}");
+        assert!(
+            reply.contains("not with [REDACTED:known_secret] or [REDACTED:known_secret]"),
+            "{tool}: {reply}"
+        );
+    }
+    let rule = h
+        .runtime
+        .add_approval_rule(
+            ApprovalDecision::Denied,
+            RuleMatch::tool("mcp__mock__write_note"),
+            RuleScope::Agent { id: agent },
+            Actor::user(),
+            Some(format!("never {NOTED}")),
+        )
+        .expect("rule");
+    assert_eq!(rule.note.as_deref(), Some("never [REDACTED:known_secret]"));
+    let revoked = h
+        .runtime
+        .revoke_approval_rule(rule.id, Actor::user(), Some(format!("leaked {NOTED}")))
+        .expect("revoke");
+    let reason = revoked.revoked.and_then(|revocation| revocation.reason);
+    assert_eq!(reason.as_deref(), Some("leaked [REDACTED:known_secret]"));
+    let events = h
+        .store
+        .events(0, 10_000, &EventFilter::all())
+        .expect("events");
+    let log = serde_json::to_string(&events).expect("json");
+    assert!(
+        log.contains("approval.resolved"),
+        "the denials were recorded"
+    );
+    assert!(!log.contains(NOTED), "a note is recorded unmasked");
+
+    if let Some(finish) = h.finish.take() {
+        let _ = finish.send(());
+    }
+}
+
 #[tokio::test]
 async fn a_call_the_engine_ran_itself_is_recorded_with_the_tools_own_class() {
     let mut h = harness().await;
@@ -605,7 +732,7 @@ async fn a_panicking_turn_leaves_no_live_per_turn_token() {
     // a panic keeps working until the agent's next turn overwrites it.
     // Removal is a drop guard, not a line on each exit path.
     let (ready_tx, mut ready) = mpsc::unbounded_channel();
-    let h = harness_with(Some(ready_tx)).await;
+    let h = harness_with(Some(ready_tx), aether_tools::Redactor::default()).await;
     let _agent = start_agent(&h);
     let bridge = ready.recv().await.expect("the turn started");
 

@@ -100,6 +100,9 @@ pub use pending_approvals::{answer_pending, pending_approvals};
 mod approvals;
 pub use approvals::{approve, rules_add, rules_list, rules_revoke};
 
+mod notify;
+pub use notify::{notify_list, notify_resolve};
+
 mod artifacts;
 #[cfg(test)]
 use artifacts::write_artifact_output;
@@ -107,14 +110,14 @@ pub use artifacts::{artifact_show, artifacts_list};
 
 mod settings;
 #[cfg(test)]
-use settings::parse_approval;
-#[cfg(test)]
 use settings::parse_deadline;
 #[cfg(test)]
 use settings::parse_network;
 #[cfg(test)]
 use settings::parse_priority;
 pub use settings::set;
+#[cfg(test)]
+use settings::{parse_approval, ungated_writes};
 
 mod update;
 pub use update::{UpdateOptions, Version as ReleaseVersion, update};
@@ -152,8 +155,11 @@ use tokio_util::sync::CancellationToken;
 
 /// `aether daemon --foreground`, as this executable. The client detaches it
 /// and watches it, so its startup output is not lost with its terminal.
+/// `workspace` must already be absolute: the child may not share our view of
+/// a relative path, and must not fall back to its own directory.
 fn daemon_command(
     socket: &PathBuf,
+    workspace: Option<&Path>,
     yolo: bool,
     max_concurrent: Option<usize>,
     allow_remote: bool,
@@ -166,6 +172,13 @@ fn daemon_command(
         .arg("daemon")
         .arg("--foreground")
         .arg("--detached");
+    if let Some(workspace) = workspace {
+        assert!(
+            workspace.is_absolute(),
+            "resolve --workspace before forwarding it"
+        );
+        command.arg("--workspace").arg(workspace);
+    }
     if yolo {
         command.arg("--yolo");
     }
@@ -190,7 +203,7 @@ async fn connect_or_start(endpoint: impl Into<aether_client::Endpoint>) -> anyho
         .local_path()
         .ok_or_else(|| anyhow!("missing local socket"))?
         .to_path_buf();
-    let command = daemon_command(&socket, false, None, false)?;
+    let command = daemon_command(&socket, None, false, None, false)?;
     ensure_daemon(&socket, command).await.map_err(|e| {
         failed_connection(
             &socket,
@@ -364,7 +377,7 @@ pub struct RunOptions {
     pub token_budget: Option<u64>,
     pub cost_budget: Option<f64>,
     pub max_turns: Option<u32>,
-    /// Approve every tool call automatically.
+    /// Approve every approval the root or an agent it delegated to asks for.
     pub yes: bool,
     /// Approvals off (`--yolo`) or on (`--no-yolo`) for this agent. `None`
     /// leaves it to the daemon's `[approval] default`.
@@ -596,8 +609,13 @@ pub struct SetKnobs {
     /// Expose everything but these; repeat for several.
     #[arg(long = "deny-tool")]
     pub deny_tools: Vec<String>,
-    /// `none`, or side-effect classes needing a person, comma separated.
-    #[arg(long)]
+    /// `none`, or the side-effect classes that wait for a person, comma
+    /// separated: `read_only` (reads and searches: read_file, grep, glob),
+    /// `idempotent_mutation` (file writes and edits: write_file, edit_file,
+    /// Write, Edit, apply_patch), `mutation` (shell commands, background
+    /// shells, delegation and other tools), `external` (the network and
+    /// outside services: web_fetch, shell commands that reach a host).
+    #[arg(long, value_name = "none|CLASS,...")]
     pub approval: Option<String>,
     /// low, normal, high or critical.
     #[arg(long)]

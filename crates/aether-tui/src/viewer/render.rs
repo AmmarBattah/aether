@@ -105,7 +105,7 @@ fn hints(viewer: &Viewer) -> &'static str {
     match kind.as_deref() {
         Some("pdf") => "PgUp/PgDn page · Alt+T text/image · Alt+E open · Esc close",
         Some("html" | "htm") => "Alt+T screenshot/text · Alt+E browser · Esc close",
-        _ => "Esc close · Alt+E external · Alt+Z full · Alt+-/= resize",
+        _ => "Esc close · Alt+E external · Alt+Z full · Alt+- / Alt+= resize",
     }
 }
 
@@ -177,4 +177,14 @@ pub fn mark_references(
         }
         crate::ui::transcript::highlight_line(line, ranges, theme.file_reference());
     }
+}
+
+#[cfg(test)]
+#[test]
+fn the_resize_hint_spaces_out_both_chords() {
+    let viewer = Viewer::default();
+    assert!(viewer.focused && viewer.path().is_none());
+    let hint = hints(&viewer);
+    assert!(hint.ends_with("Alt+- / Alt+= resize"), "{hint}");
+    assert!(!hint.contains("Alt+-/="), "{hint}");
 }

@@ -89,10 +89,11 @@ fn human_status(
     }
     out.push(format!(
         "model    {}",
-        s.default_model
-            .as_ref()
-            .map(|m| sane(&m.to_string()))
-            .unwrap_or_else(|| "none configured".into())
+        match &s.default_model {
+            Some(model) => sane(&model.to_string()),
+            None if still_probing(s) => "starting (the daemon is still detecting providers)".into(),
+            None => "none configured".into(),
+        }
     ));
     out.push(format!(
         "agents   {} live · {} running · {} waiting · {} blocked ({} suspended) · {} paused",
@@ -129,6 +130,11 @@ fn human_status(
 
 /// What the store wrote since the daemon started, and the three kinds of
 /// record that wrote most of it: the first place to look when the disk is busy.
+/// The daemon has started but not yet found its engines and default model.
+fn still_probing(s: &aether_protocol::DaemonStatus) -> bool {
+    s.engines == [aether_protocol::ENGINES_STARTING]
+}
+
 fn writes_line(writes: &aether_core::write_stats::WriteStats) -> String {
     let mib = |bytes: u64| bytes as f64 / (1u64 << 20) as f64;
     let mut line = format!(
@@ -225,16 +231,16 @@ fn approval_line(s: &aether_protocol::DaemonStatus) -> String {
 fn activity_lines(s: &aether_protocol::DaemonStatus, at: Timestamp) -> Vec<String> {
     let mut out = Vec::new();
     out.push(format!(
-        "usage    {} in · {} cached · {} out · {}",
-        units::tokens(s.usage_total.input_tokens),
-        units::tokens(s.usage_total.cache_read_tokens),
-        units::tokens(s.usage_total.output_tokens),
+        "usage    {} · {}",
+        s.usage_total.tokens_line(units::tokens),
         s.usage_total.cost_and_estimate_line()
     ));
     out.push(format!(
         "engines  {}",
         if s.engines.is_empty() {
             "none (install claude or codex for subscription access)".to_owned()
+        } else if still_probing(s) {
+            "starting (the daemon is still detecting engines)".to_owned()
         } else {
             sane(&s.engines.join(" · "))
         }
@@ -248,7 +254,7 @@ fn activity_lines(s: &aether_protocol::DaemonStatus, at: Timestamp) -> Vec<Strin
             .collect();
         out.push(format!("providers {}", rows.join("\n          ")));
     }
-    out.extend(s.runs.iter().map(|r| run_line(r, at)));
+    out.extend(run_lines(&s.runs, at));
     for holding in &s.resource_leases {
         out.push(format!(
             "holding  {} · {}{}",
@@ -269,6 +275,33 @@ fn activity_lines(s: &aether_protocol::DaemonStatus, at: Timestamp) -> Vec<Strin
         ));
     }
     out.push(format!("events   {}", s.last_seq));
+    out
+}
+
+/// Runs `aether status` lists one per line; the rest are summed up in one.
+const RUN_LINES: usize = 10;
+
+/// The runs spending now first, then the dearest so far, at most
+/// [`RUN_LINES`] of them; `--json` keeps every run.
+fn run_lines(runs: &[aether_core::budget::RunSummary], at: Timestamp) -> Vec<String> {
+    let mut ranked: Vec<_> = runs.iter().collect();
+    ranked.sort_by(|a, b| {
+        b.rate_usd_per_hour
+            .total_cmp(&a.rate_usd_per_hour)
+            .then(b.usage.cost_usd.total_cmp(&a.usage.cost_usd))
+    });
+    let shown = ranked.len().min(RUN_LINES);
+    let mut out: Vec<String> = ranked[..shown].iter().map(|r| run_line(r, at)).collect();
+    let rest = &ranked[shown..];
+    if !rest.is_empty() {
+        let idle = rest.iter().filter(|r| r.rate_usd_per_hour <= 0.0).count();
+        out.push(format!(
+            "runs     +{} more, {idle} of them idle · `aether status --json` lists every run",
+            rest.len()
+        ));
+    }
+    debug_assert!(out.len() <= RUN_LINES + 1);
+    debug_assert_eq!(out.len(), runs.len().min(RUN_LINES + 1));
     out
 }
 
@@ -487,11 +520,24 @@ mod tests {
     }
 
     #[test]
+    fn status_usage_places_cache_writes_between_input_and_cached_tokens() {
+        let at = aether_core::time::now();
+        let mut status = fixture(at);
+        status.usage_total.cache_write_tokens = 42;
+        let lines = activity_lines(&status, at);
+        assert!(
+            lines[0]
+                .starts_with("usage    1.23M in · 42 cache-write · 5.98B cached · 89.0k out · ")
+        );
+        assert!(!lines[0].contains("5981893206"));
+    }
+
+    #[test]
     fn a_person_reads_scaled_tokens_and_one_qualifier_per_run() {
         let at = aether_core::time::now();
         let text = status_text(&fixture(at), &LocalInstall::default(), false, at).expect("renders");
         assert!(
-            text.contains("usage    1.23M in · 5.98B cached · 89.0k out"),
+            text.contains("usage    1.23M in · 0 cache-write · 5.98B cached · 89.0k out"),
             "{text}"
         );
         assert!(!text.contains("5981893206"), "{text}");
@@ -512,6 +558,44 @@ mod tests {
             "an idle run forecasts nothing: {}",
             runs[1]
         );
+    }
+
+    #[test]
+    fn fifty_runs_print_the_busiest_and_sum_up_the_rest() {
+        let at = aether_core::time::now();
+        let mut status = fixture(at);
+        let (busy, idle) = (status.runs[0].clone(), status.runs[1].clone());
+        status.runs = std::iter::repeat_n(idle, 49).collect();
+        status.runs.insert(30, busy);
+        let text = status_text(&status, &LocalInstall::default(), false, at).expect("renders");
+        let runs: Vec<&str> = text.lines().filter(|l| l.starts_with("run")).collect();
+        assert_eq!(runs.len(), RUN_LINES + 1, "{text}");
+        assert!(
+            runs[0].contains("$12.00/h now"),
+            "the spending run leads: {text}"
+        );
+        assert_eq!(
+            runs[RUN_LINES],
+            "runs     +40 more, 40 of them idle · `aether status --json` lists every run"
+        );
+        let json = status_text(&status, &LocalInstall::default(), true, at).expect("renders");
+        let value: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+        assert_eq!(value["runs"].as_array().map(Vec::len), Some(50));
+    }
+
+    #[test]
+    fn a_daemon_still_probing_reads_as_starting_not_as_missing() {
+        let at = aether_core::time::now();
+        let mut status = fixture(at);
+        status.engines = vec![aether_protocol::ENGINES_STARTING.to_owned()];
+        let text = status_text(&status, &LocalInstall::default(), false, at).expect("renders");
+        assert!(text.contains("engines  starting"), "{text}");
+        assert!(text.contains("model    starting"), "{text}");
+        assert!(!text.contains("model    none"), "{text}");
+        status.engines.clear();
+        let text = status_text(&status, &LocalInstall::default(), false, at).expect("renders");
+        assert!(text.contains("engines  none"), "{text}");
+        assert!(text.contains("model    none configured"), "{text}");
     }
 
     #[test]

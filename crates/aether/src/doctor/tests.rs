@@ -97,19 +97,19 @@ fn a_retired_model_setting_fails_with_its_successor_unless_providers_define_it()
     std::fs::create_dir_all(&p.config_dir).expect("mkdir");
     std::fs::write(
         p.config_dir.join("config.toml"),
-        "[model]\ndefault = \"codex/gpt-5.6-terra\"\ncompactor = \"anthropic/haiku-4-5\"\n",
+        "[model]\ndefault = \"codex/gpt-5.6-luna\"\ncompactor = \"anthropic/haiku-4-5\"\n",
     )
     .expect("write");
     let check = check_config(&p);
     assert_eq!(check.level, Level::Fail);
     assert_eq!(
         check.detail,
-        "[model] default: codex/gpt-5.6-terra was retired; use codex/gpt-6-luna; \
+        "[model] default: codex/gpt-5.6-luna was retired; use codex/gpt-6-luna; \
          [model] compactor: anthropic/haiku-4-5 was retired; use anthropic/claude-haiku-5-5"
     );
     std::fs::write(
         p.config_dir.join("providers.toml"),
-        "[[providers.codex.add_models]]\nid = \"gpt-5.6-terra\"\n\
+        "[[providers.codex.add_models]]\nid = \"gpt-5.6-luna\"\n\
          [[providers.anthropic.add_models]]\nid = \"claude-haiku-4-5\"\naliases = [\"haiku-4-5\"]\n",
     )
     .expect("write");
@@ -463,12 +463,37 @@ fn only_providers_needing_no_credentials_are_probed() {
     );
 }
 
-#[tokio::test]
-async fn a_local_server_on_a_closed_port_is_not_ready_and_names_its_address() {
-    let open = tokio::net::TcpListener::bind("127.0.0.1:0")
+/// A server answering every request with `list` as its model list.
+async fn model_server(list: &'static str) -> u16 {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind");
-    let open_port = open.local_addr().expect("addr").port();
+    let port = listener.local_addr().expect("addr").port();
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                let (mut request, mut chunk) = (Vec::new(), [0u8; 1024]);
+                while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                    let read = stream.read(&mut chunk).await.expect("request");
+                    assert!(read > 0, "the probe hung up mid-request");
+                    request.extend_from_slice(&chunk[..read]);
+                }
+                let reply = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\
+                     content-length: {}\r\nconnection: close\r\n\r\n{list}",
+                    list.len()
+                );
+                stream.write_all(reply.as_bytes()).await.expect("reply");
+            });
+        }
+    });
+    port
+}
+
+#[tokio::test]
+async fn a_local_server_on_a_closed_port_is_not_ready_and_names_its_address() {
+    let open_port = model_server(r#"{"object":"list","data":[{"id":"llama3"}]}"#).await;
     let closed_port = {
         let probe = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
         probe.local_addr().expect("addr").port()
@@ -483,13 +508,16 @@ async fn a_local_server_on_a_closed_port_is_not_ready_and_names_its_address() {
             base_url: format!("http://127.0.0.1:{closed_port}/v1"),
         },
     ];
-    let down = unreachable_servers(&servers, PROBE_TIMEOUT).await;
+    let down = servers_not_serving(&servers, PROBE_TIMEOUT)
+        .await
+        .expect("probe");
     let address = format!("127.0.0.1:{closed_port}");
     assert_eq!(
         down,
-        vec![Unreachable {
+        vec![NotServing {
             provider: "vllm".into(),
             address: address.clone(),
+            fault: Fault::Unreachable,
         }]
     );
 
@@ -518,11 +546,50 @@ async fn a_local_server_on_a_closed_port_is_not_ready_and_names_its_address() {
     assert!(only_down.detail.contains(&address), "{}", only_down.detail);
 }
 
+#[tokio::test]
+async fn a_local_server_that_serves_no_models_is_not_ready() {
+    let empty = model_server(r#"{"object":"list","data":[]}"#).await;
+    let unparsed = model_server("not a model list").await;
+    let servers = [
+        LocalServer {
+            provider: "ollama".into(),
+            base_url: format!("http://127.0.0.1:{empty}/v1"),
+        },
+        LocalServer {
+            provider: "llamacpp".into(),
+            base_url: format!("http://127.0.0.1:{unparsed}/v1/"),
+        },
+    ];
+    let down = servers_not_serving(&servers, PROBE_TIMEOUT)
+        .await
+        .expect("probe");
+    let address = format!("127.0.0.1:{empty}");
+    assert_eq!(
+        down,
+        vec![NotServing {
+            provider: "ollama".into(),
+            address: address.clone(),
+            fault: Fault::NoModels,
+        }],
+        "a list it cannot read may still serve a named model"
+    );
+    let check = check_providers(&[local("ollama")], &down, None, "aether");
+    assert_eq!(check.level, Level::Fail, "{}", check.detail);
+    assert!(
+        check
+            .detail
+            .contains(&format!("ollama at {address} serves no models")),
+        "{}",
+        check.detail
+    );
+}
+
 #[test]
 fn a_default_model_no_ready_provider_serves_is_a_failure() {
-    let down = [Unreachable {
+    let down = [NotServing {
         provider: "vllm".into(),
         address: "localhost:8000".into(),
+        fault: Fault::Unreachable,
     }];
     let auth = [
         auth("claude-code", true),
@@ -597,6 +664,32 @@ fn an_engine_that_is_present_but_not_signed_in_is_called_out() {
     );
     assert_eq!(all.level, Level::Ok);
     assert!(all.fix.is_none());
+}
+
+#[test]
+fn a_daemon_still_detecting_engines_is_not_told_to_restart() {
+    let found = [(
+        "claude-code".into(),
+        EngineStatus::Ready("claude-code/2.1.0".into()),
+    )];
+    let starting = check_engines(
+        &found,
+        Some(&[aether_protocol::ENGINES_STARTING.to_owned()]),
+        "aether",
+    );
+    assert_eq!(starting.level, Level::Ok, "{}", starting.detail);
+    assert!(starting.fix.is_none());
+    assert!(
+        starting.detail.contains("still detecting engines"),
+        "{}",
+        starting.detail
+    );
+    let missing = check_engines(&found, Some(&[]), "aether");
+    assert_eq!(
+        missing.level,
+        Level::Warn,
+        "a finished empty list still warns"
+    );
 }
 
 /// A version too old to speak a flag a future adapter's `args()`
@@ -1282,4 +1375,35 @@ fn an_engine_the_daemon_cannot_see_is_named() {
         Level::Ok
     );
     assert_eq!(check_engines(&found, None, "aether").level, Level::Ok);
+}
+
+#[test]
+fn an_unclean_daemon_stop_warns_until_a_clean_one() {
+    use aether_core::crash::shutdown;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let paths = paths(dir.path());
+    std::fs::create_dir_all(&paths.data_dir).expect("data dir");
+    let store = paths.store_path();
+    assert_eq!(check_shutdown(&paths, false, "aether").level, Level::Ok);
+    shutdown::begin(&store, 10).expect("start");
+    let live = check_shutdown(&paths, true, "aether");
+    assert_eq!(
+        live.level,
+        Level::Ok,
+        "a live daemon's own mark: {}",
+        live.detail
+    );
+    let killed = check_shutdown(&paths, false, "aether");
+    assert_eq!(killed.level, Level::Warn);
+    assert!(killed.detail.contains("pid 10"), "{}", killed.detail);
+    shutdown::begin(&store, 11).expect("restart after the kill");
+    let found = check_shutdown(&paths, true, "aether");
+    assert_eq!(found.level, Level::Warn);
+    assert!(
+        found.detail.contains("stopped without a clean shutdown"),
+        "{}",
+        found.detail
+    );
+    shutdown::end(&store).expect("clean stop");
+    assert_eq!(check_shutdown(&paths, false, "aether").level, Level::Ok);
 }

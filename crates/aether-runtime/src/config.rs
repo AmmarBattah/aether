@@ -58,7 +58,8 @@ pub struct RuntimeConfig {
     /// admitted. Unset means nothing changes.
     pub run_hard_stop: aether_core::budget::HardStop,
     pub lease_ttl: Duration,
-    /// Model used when an agent is created without one.
+    /// Model used when an agent is created without one. Unset, `start`
+    /// resolves it from the signed-in providers alongside engine detection.
     pub default_model: Option<ModelRef>,
     /// Workspace root for agents created without a scope.
     pub workspace_root: Option<PathBuf>,
@@ -129,6 +130,11 @@ pub struct RuntimeConfig {
     /// Masks tool and engine output before it is recorded. The daemon seeds
     /// it with the secret values it knows; its `Debug` never prints them.
     pub redactor: aether_tools::Redactor,
+    /// Wait for the store (a write, or the writer ahead of one) through
+    /// `tokio::task::block_in_place`, so a database another process keeps
+    /// locked stalls no other task. Only on a multi-threaded runtime and
+    /// outside a `LocalSet`, where it panics; the daemon sets it.
+    pub store_writes_off_worker: bool,
 }
 
 /// Where free space is measured, and how much new turns wait for.
@@ -185,6 +191,7 @@ impl Default for RuntimeConfig {
             memory_index: None,
             disk_guard: None,
             redactor: aether_tools::Redactor::default(),
+            store_writes_off_worker: false,
         }
     }
 }

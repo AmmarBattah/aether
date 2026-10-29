@@ -99,7 +99,7 @@ impl Runtime {
                 skipped.insert(agent.id);
                 continue;
             }
-            if !policy.is_yolo() && !self.engine_can_gate(&agent.model) {
+            if !policy.is_yolo() && !self.engine_can_gate(&agent.model)? {
                 return Err(RuntimeError::Invalid(format!(
                     "agent {} runs on {}, which cannot ask before acting; approvals cannot be \
                      turned on for it",
@@ -167,6 +167,9 @@ impl Runtime {
         if let Some(receipt) = self.replay_receipt(&hold, submission.as_ref())? {
             return Ok(receipt);
         }
+        // Masked before it is recorded: the note reaches the event log, the
+        // asker's inbox and, as a denial reason, the engine.
+        let note = note.map(|note| self.tool_runtime.redactor().redact(&note).into_owned());
         let mut approval = self
             .store
             .approval(id)?
@@ -249,15 +252,78 @@ impl Runtime {
         Ok(())
     }
 
+    /// Expire an approval whose turn ended before anyone answered it. `None`
+    /// means this call expired it; `Some` is an answer that landed first,
+    /// which is kept rather than undone.
+    pub(crate) fn expire_approval(
+        &self,
+        id: ApprovalId,
+        why: &str,
+    ) -> Result<Option<ApprovalStatus>> {
+        let hold = self.hold();
+        let approval = self
+            .store
+            .approval(id)?
+            .ok_or_else(|| RuntimeError::NotFound(id.to_string()))?;
+        if let ApprovalStatus::Resolved { .. } = approval.status {
+            return Ok(Some(approval.status));
+        }
+        let agent = self
+            .store
+            .agent(approval.agent_id)?
+            .ok_or_else(|| RuntimeError::NotFound(approval.agent_id.to_string()))?;
+        let mut commit = Commit::new();
+        crate::approval::expiry_commit(&mut commit, approval, &agent, why);
+        self.apply_held(hold, commit)?;
+        Ok(None)
+    }
+
+    /// Expire every approval `agent` still has pending; the caller holds the
+    /// commit lock and applies `commit`.
+    pub(crate) fn expire_agent_approvals(
+        &self,
+        _hold: &crate::CommitHold<'_>,
+        commit: &mut Commit,
+        agent: &Agent,
+        why: &str,
+    ) -> Result<()> {
+        for approval in self.store.pending_approvals()? {
+            if approval.agent_id == agent.id {
+                crate::approval::expiry_commit(commit, approval, agent, why);
+            }
+        }
+        Ok(())
+    }
+
     /// Whether an approval policy can be honoured for agents on `model`:
     /// always for API models; for engines, only when the engine asks before
-    /// acting (Codex's exec mode does not).
-    pub fn engine_can_gate(&self, model: &ModelRef) -> bool {
+    /// acting (Codex's exec mode does not). Unknown, so an error, while
+    /// engine detection still runs.
+    pub fn engine_can_gate(&self, model: &ModelRef) -> Result<bool> {
         let Ok(resolved) = self.models.resolve(model) else {
-            return true;
+            return Ok(true);
         };
-        crate::turn_engine::engine_kind(resolved.provider.protocol)
-            .and_then(|kind| self.engines.get(&kind))
-            .is_none_or(|engine| engine.gates_permissions())
+        let Some(kind) = crate::turn_engine::engine_kind(resolved.provider.protocol) else {
+            return Ok(true);
+        };
+        Ok(self
+            .engines
+            .now()?
+            .get(&kind)
+            .is_none_or(|engine| engine.gates_permissions()))
+    }
+
+    /// Whether any of `models` runs on an engine that cannot gate; see
+    /// [`Runtime::engine_can_gate`].
+    pub(crate) fn any_engine_cannot_gate<'a>(
+        &self,
+        models: impl IntoIterator<Item = &'a ModelRef>,
+    ) -> Result<bool> {
+        for model in models {
+            if !self.engine_can_gate(model)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 }

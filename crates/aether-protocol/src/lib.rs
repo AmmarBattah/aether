@@ -214,6 +214,12 @@ pub mod features {
     /// `list_notifications`, `get_notification`, `mark_notification_read`,
     /// `resolve_notification` and `answer_notification`.
     pub const NOTIFICATIONS: &str = "notifications";
+    /// The daemon applies `UpdateAgent.subtree`: a raised deadline or cost
+    /// budget also reaches the live descendants.
+    pub const SUBTREE_UPDATE: &str = "subtree_update";
+    /// Both sides of a connection handle `ErrorCode::HistoryExpired`. The
+    /// daemon sends it only to a client whose hello lists this feature.
+    pub const HISTORY_EXPIRED: &str = "history_expired";
 }
 
 mod handshake;
@@ -227,8 +233,8 @@ mod command;
 pub use command::{Command, KeyedRequest};
 mod replies;
 pub use replies::{
-    AgentTree, AuthInfo, DaemonStatus, ErrorCode, ErrorReply, MessageDelivery, ModelInfo,
-    ProviderInfo, Reply, RunListing, SubmissionResolution, TranscriptEntry, TreeNode,
+    AgentTree, AuthInfo, DaemonStatus, ENGINES_STARTING, ErrorCode, ErrorReply, MessageDelivery,
+    ModelInfo, ProviderInfo, Reply, RunListing, SubmissionResolution, TranscriptEntry, TreeNode,
 };
 mod frames;
 pub use frames::{ClientFrame, Delta, ServerFrame, decode, encode};

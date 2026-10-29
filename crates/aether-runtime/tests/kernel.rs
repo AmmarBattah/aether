@@ -259,12 +259,18 @@ mod shutdown_recovery;
 mod snapshot_reconstruction;
 #[path = "kernel/store_double.rs"]
 mod store_double;
+#[path = "kernel/store_lock.rs"]
+mod store_lock;
 #[path = "kernel/store_outage.rs"]
 mod store_outage;
 #[path = "kernel/subtree_cancellation.rs"]
 mod subtree_cancellation;
 #[path = "kernel/subtree_policy.rs"]
 mod subtree_policy;
+#[path = "kernel/subtree_reads.rs"]
+mod subtree_reads;
+#[path = "kernel/subtree_update.rs"]
+mod subtree_update;
 #[path = "kernel/supervisor_dispatch.rs"]
 mod supervisor_dispatch;
 #[path = "kernel/suspension.rs"]

@@ -80,8 +80,16 @@ impl Store for SqliteStore {
         &self,
         run: aether_core::id::RunId,
         before: Timestamp,
-    ) -> Result<Option<crate::RunExpiry>> {
+    ) -> Result<crate::HistoryScreen> {
         SqliteStore::screen_run_expiry(self, run, before)
+    }
+
+    fn expire_screened_run(
+        &self,
+        screen: &crate::HistoryScreen,
+        hold: &crate::Hold<'_>,
+    ) -> Result<crate::RunExpiry> {
+        SqliteStore::expire_screened_run(self, screen, hold)
     }
 
     fn commit(&self, commit: Commit) -> Result<Vec<Event>> {
@@ -274,6 +282,29 @@ impl Store for SqliteStore {
         Ok(events.pop())
     }
 
+    fn latest_custom_event(&self, names: &[&str]) -> Result<Option<Event>> {
+        if names.is_empty() {
+            return Ok(None);
+        }
+        let conn = self.read_conn();
+        // The `(type, seq)` index walks custom events newest first.
+        let sql = "SELECT body FROM events WHERE type = 'custom' \
+                   AND json_extract(body, '$.kind.name') IN (SELECT value FROM json_each(?1)) \
+                   ORDER BY seq DESC LIMIT 1";
+        let mut events =
+            super::event_blobs::read_events(&conn, sql, &[&serde_json::to_string(names)?])?;
+        debug_assert!(events.len() <= 1, "the query is limited to one row");
+        let event = events.pop();
+        debug_assert!(
+            event.as_ref().is_none_or(|event| matches!(
+                &event.kind,
+                aether_core::event::EventKind::Custom { name, .. } if names.contains(&name.as_str())
+            )),
+            "the query matches only the names asked for"
+        );
+        Ok(event)
+    }
+
     fn event_by_seq(&self, seq: u64) -> Result<Option<Event>> {
         if seq == 0 || seq > i64::MAX as u64 {
             return Ok(None);
@@ -403,6 +434,44 @@ impl Store for SqliteStore {
             );
         }
         Ok(ids)
+    }
+
+    fn subtree_agents(&self, root: AgentId) -> Result<Vec<Agent>> {
+        // CROSS JOIN pins the walk as the outer loop; left to itself the
+        // planner scans every agent through `agents_created` instead.
+        self.record_list(
+            "agents",
+            "WITH RECURSIVE down(id) AS (
+                 SELECT id FROM agents WHERE id = ?1
+                 UNION
+                 SELECT a.id FROM agents a JOIN down ON a.parent = down.id
+             )
+             SELECT a.id, a.body FROM down CROSS JOIN agents a ON a.id = down.id
+             ORDER BY a.created_at ASC, a.rowid ASC",
+            &[&root.to_string()],
+            |agent: &Agent| agent.id.to_string(),
+        )
+    }
+
+    fn ancestry(&self, ids: &[AgentId]) -> Result<Vec<Agent>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let args: Vec<String> = ids.iter().map(ToString::to_string).collect();
+        let refs: Vec<&dyn rusqlite::ToSql> =
+            args.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
+        let placeholders = vec!["?"; args.len()].join(",");
+        // UNION drops repeated rows, so a corrupt parent cycle ends the walk.
+        let sql = format!(
+            "WITH RECURSIVE up(id, parent) AS (
+                 SELECT id, parent FROM agents WHERE id IN ({placeholders})
+                 UNION
+                 SELECT a.id, a.parent FROM agents a JOIN up ON a.id = up.parent
+             )
+             SELECT a.id, a.body FROM up CROSS JOIN agents a ON a.id = up.id
+             ORDER BY a.created_at ASC, a.rowid ASC"
+        );
+        self.record_list("agents", &sql, &refs, |agent: &Agent| agent.id.to_string())
     }
 
     fn task(&self, id: TaskId) -> Result<Option<Task>> {

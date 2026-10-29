@@ -4,7 +4,8 @@ use std::num::NonZeroU64;
 
 use aether_core::id::{AgentId, ScheduleId};
 use aether_core::schedule::{
-    BusyPolicy, CreateScheduleSpec, MissedRunPolicy, Recurrence, ScheduleAction, ScheduleTarget,
+    BusyPolicy, CreateScheduleSpec, MIN_INTERVAL_SECONDS, MissedRunPolicy, Recurrence,
+    ScheduleAction, ScheduleTarget,
 };
 use aether_core::tool::{ResourceKey, SideEffectClass, ToolDescriptor};
 use async_trait::async_trait;
@@ -41,7 +42,7 @@ impl Tool for ScheduleTool {
                 json!({
                     "type":"object", "properties": {
                         "name":{"type":"string"}, "target":{"type":"string"},
-                        "every_seconds":{"type":"integer","minimum":1}, "cron":{"type":"string"},
+                        "every_seconds":{"type":"integer","minimum":MIN_INTERVAL_SECONDS}, "cron":{"type":"string"},
                         "timezone":{"type":"string"}, "payload":{},
                         "missed":{"type":"string","enum":["coalesce","skip"]},
                         "busy":{"type":"string","enum":["skip","queue_one"]},
@@ -121,6 +122,11 @@ impl Tool for ScheduleTool {
                     .transpose()?
                     .unwrap_or_default();
                 let recurrence = match (input.every_seconds, input.cron, input.timezone) {
+                    (Some(seconds), None, None) if seconds.get() < MIN_INTERVAL_SECONDS => {
+                        return Err(ToolError::InvalidInput(format!(
+                            "every_seconds must be at least {MIN_INTERVAL_SECONDS}; got {seconds}"
+                        )));
+                    }
                     (Some(seconds), None, None) => Recurrence::Interval { seconds },
                     (None, Some(expression), timezone) => Recurrence::Cron {
                         expression,

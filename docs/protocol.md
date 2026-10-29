@@ -46,6 +46,16 @@ the Rust client refuses it to an older one before sending. The level rides in
 the note event's payload, which older clients decode without it, so they show
 the note as a plain one.
 
+Within version 24, `update_agent` takes `subtree`, announced by the
+`subtree_update` feature (see [raising a subtree's limits](#raising-a-subtrees-limits)).
+It is left off the wire when false, so a plain update is unchanged; the Rust
+client refuses `subtree` to a daemon that does not announce the feature.
+
+Also within version 24, the `history_expired` error code reports a cursor
+behind history retention, with the expired span; see
+[expired history](#expired-history). Only a client that lists the
+`history_expired` feature in its hello receives it.
+
 Version 23 adds `append_note`, advertised by the `notes` feature, and the
 `not_started` turn outcome: `replay` of an agent that has taken no turn
 returns one turn-0 frame holding its notes. Clients on versions 17 through 22
@@ -214,6 +224,61 @@ it to one.
 (see [notification center](#notification-center)). An older daemon refuses
 them as unknown; the Rust client refuses to send them to one, and
 `Client::serves_notifications` lets a client skip the center instead.
+
+`subtree_update` means `update_agent` applies `subtree` (see
+[raising a subtree's limits](#raising-a-subtrees-limits)). An older daemon
+ignores the field and updates the named agent alone, leaving its children on
+the old deadline; the Rust client refuses such an update itself, and
+`Client::serves_subtree_update` lets a host fall back to updating each live
+descendant instead.
+
+`history_expired` is listed by the daemon and, unlike the others, by the
+client too: a client that lists it in `Hello.features` receives the
+`history_expired` error code (see [expired history](#expired-history)).
+
+## Expired history
+
+History retention deletes the events of old finished runs and keeps a record
+of the sequence numbers it removed. A `subscribe` or `get_events` whose range
+reaches into removed events is refused rather than silently skipping them. To
+a client whose hello lists the `history_expired` feature the refusal is:
+
+```json
+{"code": "history_expired",
+ "message": "event history expired within sequence range 1..=2; obtain a fresh state snapshot before resuming replay",
+ "first_seq": 1, "last_seq": 2}
+```
+
+`first_seq` and `last_seq` bound the expired events the request reached; no
+other error carries them. Every other client receives `not_found` with the
+same message and no span, as all daemons before this one sent. A client can
+reload current state and resume from a cursor after `last_seq`.
+
+`get_events` answers with the refusal and the connection stays open. A
+subscription finds the gap while it replays, after `subscribed`: the daemon
+sends the refusal as a notice on request id 0 and closes the connection, as
+it did before. The Rust client sends the feature, and exposes the span as
+`ClientError::expired_span` and, for that closing notice,
+`Client::expired_span`.
+
+## Raising a subtree's limits
+
+A delegated child starts with a copy of its parent's absolute `deadline` and
+`cost_budget`, so extending only the parent leaves the child to be stopped at
+the old deadline. `update_agent` with `"subtree": true` applies the patch to
+the named agent as usual and, in the same transaction, raises every live
+descendant's limits to the named agent's new ones:
+
+- A patched `deadline` or `cost_budget` reaches a descendant only where it
+  raises that descendant's own value. A later deadline, a larger budget or no
+  limit at all is kept, so nothing is ever shortened. Clearing a limit
+  (`"clear"`, or a `cost_budget` of 0) is the highest raise and removes it.
+- No other field of the patch propagates: a name, instructions, model,
+  effort, turn cap or token budget changes the named agent alone.
+- Finished descendants are not touched. Each descendant that changes gets one
+  `agent.config_updated` event; one left as it was gets none.
+- The reply is the named agent, as for a plain update. The command needs the
+  same access as updating the named agent.
 
 ## Naming a checkout
 

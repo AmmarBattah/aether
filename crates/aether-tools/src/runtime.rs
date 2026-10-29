@@ -7,7 +7,7 @@ use std::time::Duration;
 use aether_core::agent::ApprovalPolicy;
 use aether_core::idempotency::IdempotencyKey;
 use aether_core::time::{Timestamp, now};
-use aether_core::tool::{SideEffectClass, ToolCall, ToolDescriptor};
+use aether_core::tool::{SideEffectClass, ToolCall, ToolDescriptor, ToolOutcome};
 use tokio::sync::watch;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
@@ -253,22 +253,14 @@ impl ToolRuntime {
                 // Nothing is left of the budget, so another attempt could
                 // only time out again; report what actually happened.
                 Err(e) if e.is_retryable() && attempt < attempts && !out_of_time => {
-                    retried.push(e.to_string())
+                    retried.push(redactor.redact(&e.to_string()).into_owned())
                 }
                 _ => break,
             }
         }
         let result = result.map(|exec| match exec {
             ToolExecution::Outcome(mut outcome) => {
-                if let std::borrow::Cow::Owned(clean) = redactor.redact(&outcome.content) {
-                    outcome.content = clean;
-                }
-                // `structured` is committed to the event log whole, and an
-                // MCP server chooses its content, so the redactor must see
-                // it too - not just the text half.
-                if let Some(value) = outcome.structured.as_mut() {
-                    redact_json(&redactor, value);
-                }
+                redact_outcome(&redactor, &mut outcome);
                 ToolExecution::Outcome(outcome)
             }
             action => action,
@@ -288,9 +280,21 @@ impl ToolRuntime {
     }
 }
 
-/// Redact every string *value* in a JSON value, in place, at any depth;
-/// serde_json's own parse depth limit bounds the recursion. Keys are names a
-/// server chose, not content, so they are left as they are.
+/// Mask an outcome's text and its `structured` value before it is committed.
+/// `structured` is committed to the event log whole, and an MCP server or an
+/// artifact chooses its content, so the redactor must see it too.
+pub fn redact_outcome(redactor: &Redactor, outcome: &mut ToolOutcome) {
+    if let std::borrow::Cow::Owned(clean) = redactor.redact(&outcome.content) {
+        outcome.content = clean;
+    }
+    if let Some(value) = outcome.structured.as_mut() {
+        redact_json(redactor, value);
+    }
+}
+
+/// Redact every string and object key in a JSON value, in place, at any
+/// depth; serde_json's own parse depth limit bounds the recursion. A key is
+/// whatever a server chose to put there, so it can carry a secret too.
 pub fn redact_json(redactor: &Redactor, value: &mut serde_json::Value) {
     match value {
         serde_json::Value::String(text) => {
@@ -304,12 +308,37 @@ pub fn redact_json(redactor: &Redactor, value: &mut serde_json::Value) {
             }
         }
         serde_json::Value::Object(fields) => {
+            redact_keys(redactor, fields);
             for field in fields.values_mut() {
                 redact_json(redactor, field);
             }
         }
         _ => {}
     }
+}
+
+/// Masks the keys of one object. Two keys can mask to the same text, so a
+/// repeat gets a numbered suffix rather than replacing the other's value.
+fn redact_keys(redactor: &Redactor, fields: &mut serde_json::Map<String, serde_json::Value>) {
+    use std::borrow::Cow;
+    if !fields
+        .keys()
+        .any(|key| matches!(redactor.redact(key), Cow::Owned(_)))
+    {
+        return;
+    }
+    let count = fields.len();
+    let mut suffix = 1usize;
+    for (key, value) in std::mem::take(fields) {
+        let masked = redactor.redact(&key).into_owned();
+        let mut unique = masked.clone();
+        while fields.contains_key(&unique) {
+            suffix += 1;
+            unique = format!("{masked} ({suffix})");
+        }
+        fields.insert(unique, value);
+    }
+    debug_assert_eq!(fields.len(), count, "no field is lost to a masked key");
 }
 
 #[cfg(test)]

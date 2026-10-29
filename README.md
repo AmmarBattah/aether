@@ -11,7 +11,9 @@ curl -fsSL https://raw.githubusercontent.com/mengsig/aether/main/install.sh | sh
 ```
 
 Aether drives an engine CLI for the quick start; install [one of the engines below](#prerequisites).
-Update with `aether update`.
+Update with `aether update`. Restart on a desktop with `aether stop` then
+`aether`; on a server or headless host, use `aether stop && aether daemon`
+(no TUI).
 For source builds and version pinning, see [other installation methods](docs/install.md).
 
 To build from source, install Git, a C compiler and Rust via rustup; the repository pins its Rust toolchain.
@@ -87,13 +89,17 @@ aether
 
 Aether opens the terminal UI in your current project and starts its daemon on demand; type a request to begin.
 Use `/model` to choose a model, `?` with an empty draft for shortcuts, and `/quit` to leave while agents keep running.
-With a provider signed in, new agents use that engine's balanced, priced model (`claude-code/claude-sonnet-5-5`, `codex/gpt-6.1-sol`) rather than its priciest one or the CLI's unpriced `default`; the status line shows the model and its price before your first turn (`aether models` lists every price).
+With a provider signed in, new agents use that engine's balanced, priced model (`claude-code/claude-sonnet-5-5`, `codex/gpt-6.1-terra`) rather than its priciest one or the CLI's unpriced `default`; the status line shows the model and its price before your first turn (`aether models` lists every price).
 On a first start with neither engine signed in and no other provider configured,
 no agent is created and you see “no model to run on yet”; use `/login claude-code` or `/login codex`, then send a request.
 `aether run` in that state fails with “run `aether login claude-code` or `aether login codex`, or pass --model”.
 
 For scripts, use `aether run "Explain what this project does. Do not edit files." --model claude-code/default --effort medium` (for Codex, use `--model codex/default`).
 `default` lets that engine CLI select its model; the run prints the agent's response.
+Model aliases work too: `claude-code/sonnet` means
+`claude-code/claude-sonnet-5-5`, and `codex/terra` means `codex/gpt-6.1-terra`.
+`aether models` shows full IDs; see [Model aliases](docs/configuration.md#model-aliases)
+for the provider-specific list.
 Use `aether doctor` when something does not work, and `aether auth` to see each provider's sign-in status (`ready` or `not set`).
 
 ## Use it from your phone

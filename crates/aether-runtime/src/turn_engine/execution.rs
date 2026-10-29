@@ -24,23 +24,19 @@ pub(crate) async fn execute(
     let Some(kind) = engine_kind(resolved.provider.protocol) else {
         return Err(RuntimeError::Internal("not an engine provider".into()));
     };
-    let Some(engine) = runtime.engines.get(&kind).cloned() else {
-        // Preflight recorded why, when it ran: too old or missing a
-        // capability reads very differently from genuinely not installed,
-        // and only the stored reason tells them apart.
-        let reason = runtime
-            .engine_unavailable
-            .get(&kind)
-            .cloned()
-            .unwrap_or_else(|| {
-                format!(
-                    "{} is not installed on this machine; install it, sign in to {} from your client, and retry",
-                    kind.as_str(),
-                    resolved.provider.id
-                )
-            });
+    // An engine found unusable is probed again here, so the reason is current.
+    let detected = runtime.engines.recheck(kind).await;
+    let Some(engine) = detected.get(&kind) else {
+        let reason = crate::engine_access::unavailable_text(
+            kind,
+            &resolved.provider.id,
+            detected.unavailable.get(&kind).map(String::as_str),
+        );
         return Ok(EngineLink::Done(Next::Failed(reason)));
     };
+    if let Some(reason) = ungated_refusal(runtime, &ctx.agent, engine.as_ref()) {
+        return Ok(EngineLink::Done(Next::Failed(reason)));
+    }
     let Some(bridge) = runtime.config.bridge.clone() else {
         return Ok(EngineLink::Done(Next::Failed(
             "engine bridge is not configured on this daemon".into(),
@@ -697,6 +693,30 @@ pub(crate) async fn execute(
     .map(EngineLink::Done)
 }
 
+/// Why `agent` must not run on `engine`: its approval policy gates calls,
+/// and the engine detected now cannot ask before acting (Codex exec mode).
+/// A CLI replaced since the agent was admitted must not drop its approvals.
+fn ungated_refusal(
+    runtime: &Runtime,
+    agent: &aether_core::agent::Agent,
+    engine: &dyn aether_engine::Engine,
+) -> Option<String> {
+    if runtime.config.yolo || agent.config.approval.is_yolo() || engine.gates_permissions() {
+        return None;
+    }
+    debug_assert!(!agent.config.approval.require_for.is_empty());
+    Some(format!(
+        "{} now runs as {}, which cannot ask before acting, and this agent's approval \
+         policy requires approvals; install a CLI that can (for Codex, one with app-server \
+         support), or turn approvals off with `aether set {} --approval none`, then retry \
+         with `aether wake {}`",
+        engine.kind().as_str(),
+        engine.adapter(),
+        agent.id,
+        agent.id,
+    ))
+}
+
 /// Fold one engine run's closing totals into the agent's usage and commit it.
 /// Each run reconciles only its own provisional, streamed accounting.
 pub(super) fn settle_usage(
@@ -730,7 +750,7 @@ pub(super) fn settle_usage(
             turn_usage: ctx.turn_usage,
         }));
     }
-    runtime.apply_held(hold, commit)?;
+    runtime.apply_held_through_lock(hold, commit, ctx.agent.id, "the turn's closing usage")?;
 
     Ok(())
 }

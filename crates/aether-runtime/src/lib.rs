@@ -25,6 +25,7 @@ pub mod notes;
 pub mod notifications;
 mod orphans;
 mod peers;
+mod problems;
 pub mod recovery;
 mod repository_aliases;
 pub mod resources;
@@ -91,6 +92,9 @@ pub enum RuntimeError {
     /// Nothing names a model and the daemon has no default to fall back on.
     #[error("no model configured; sign in from your client")]
     NoModel,
+    /// A startup probe this needs has not finished; retrying soon succeeds.
+    #[error("daemon starting: {0}")]
+    Starting(String),
     #[error("internal: {0}")]
     Internal(String),
 }
@@ -131,7 +135,6 @@ pub use config::{
     DEFAULT_EXHAUSTION_PROBE_FLOOR, DEFAULT_MAX_CONCURRENT_TURNS, DEFAULT_ORPHAN_IDLE,
     DEFAULT_ORPHAN_SWEEP_INTERVAL, DEFAULT_RESOURCE_WAIT_TIMEOUT, DiskGuard, RuntimeConfig,
 };
-use engine_access::detect_engines;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct CancelRequest {
@@ -294,12 +297,9 @@ pub struct Runtime {
     pub(crate) default_model: parking_lot::RwLock<Option<ModelRef>>,
     /// Test hook: bypass provider resolution and use this client for every turn.
     pub(crate) client_override: Option<Arc<dyn ModelClient>>,
-    /// External engines found on this machine.
-    pub(crate) engines: HashMap<aether_engine::EngineKind, Arc<dyn aether_engine::Engine>>,
-    /// Why an engine absent from `engines` is unusable, when preflight ran
-    /// and found a specific reason - empty for engines supplied
-    /// directly via `start_with_engines`, which have no such history.
-    pub(crate) engine_unavailable: HashMap<aether_engine::EngineKind, String>,
+    /// External engines found on this machine, once detection finishes.
+    /// Engines supplied via `start_with_engines` carry no unavailable reasons.
+    pub(crate) engines: engine_access::EngineCatalog,
     /// Engine turns in flight, keyed by agent, for routing bridge calls.
     pub(crate) engine_turns: parking_lot::Mutex<HashMap<AgentId, turn_engine::EngineTurnHandle>>,
     pub(crate) tools: Arc<ToolRegistry>,
@@ -331,7 +331,7 @@ pub struct Runtime {
     pub(crate) seeded_repositories: parking_lot::Mutex<std::collections::HashSet<AgentId>>,
     /// Free space on the store's filesystem, as the disk guard last saw it.
     pub(crate) disk: parking_lot::Mutex<disk::DiskState>,
-    problems: parking_lot::RwLock<std::collections::BTreeMap<String, String>>,
+    problems: problems::Problems,
     recovery_failed: std::sync::atomic::AtomicBool,
     workspace_gc_cursor: parking_lot::Mutex<workspace_gc::WorkspaceGcCursor>,
     workspace_gc_active: parking_lot::Mutex<Option<std::path::PathBuf>>,
@@ -347,6 +347,8 @@ impl std::fmt::Debug for Runtime {
 
 impl Runtime {
     /// Build the runtime, recover interrupted work, and start the scheduler.
+    /// Engines, and a default model `config` leaves unset, are found in the
+    /// background; see [`Runtime::await_startup_probes`].
     pub async fn start(
         config: RuntimeConfig,
         store: Arc<dyn Store>,
@@ -365,18 +367,18 @@ impl Runtime {
         tools: Arc<ToolRegistry>,
         client_override: Option<Arc<dyn ModelClient>>,
     ) -> Result<Arc<Self>> {
-        let (engines, engine_unavailable) =
-            detect_engines(models.config().model.prompt_cache_ttl).await;
-        Self::start_with_engines_inner(
+        let prompt_cache_ttl = models.config().model.prompt_cache_ttl;
+        let runtime = Self::start_with_engines_inner(
             config,
             store,
             models,
             tools,
             client_override,
-            engines,
-            engine_unavailable,
+            engine_access::EngineCatalog::probing(prompt_cache_ttl),
         )
-        .await
+        .await?;
+        engine_access::spawn_startup_probes(&runtime, prompt_cache_ttl);
+        Ok(runtime)
     }
 
     /// Like [`Runtime::start_with`], with the engines given instead of
@@ -397,8 +399,10 @@ impl Runtime {
             models,
             tools,
             client_override,
-            engines,
-            HashMap::new(),
+            engine_access::EngineCatalog::detected(engine_access::DetectedEngines {
+                usable: engines,
+                unavailable: HashMap::new(),
+            }),
         )
         .await
     }
@@ -409,25 +413,28 @@ impl Runtime {
         models: Arc<Models>,
         tools: Arc<ToolRegistry>,
         client_override: Option<Arc<dyn ModelClient>>,
-        engines: HashMap<aether_engine::EngineKind, Arc<dyn aether_engine::Engine>>,
-        engine_unavailable: HashMap<aether_engine::EngineKind, String>,
+        engines: engine_access::EngineCatalog,
     ) -> Result<Arc<Self>> {
         attachments::check_attachment_dir(config.attachment_dir.as_deref())?;
         // One gate for the whole daemon: memory curation is a read-modify-write
         // against the same store a turn commits to, so both take this.
         let commit_lock = aether_store::WriteGate::new();
+        let bus = EventBus::new();
+        // Curation commits on its own, so it publishes as `apply` does.
+        let memory = {
+            let bus = bus.clone();
+            MemoryService::new(store.clone(), commit_lock.clone())
+                .with_publisher(Arc::new(move |event| bus.publish_event(event.clone())))
+        };
         let runtime = Arc::new_cyclic(|me| Self {
             me: me.clone(),
             memory: match config.memory_index.clone() {
-                Some(index) => {
-                    MemoryService::new(store.clone(), commit_lock.clone()).with_index(index)
-                }
-                None => MemoryService::new(store.clone(), commit_lock.clone()),
+                Some(index) => memory.with_index(index),
+                None => memory,
             },
             default_model: parking_lot::RwLock::new(config.default_model.clone()),
             client_override,
             engines,
-            engine_unavailable,
             engine_turns: parking_lot::Mutex::new(HashMap::new()),
             store,
             models,
@@ -435,7 +442,7 @@ impl Runtime {
             resources: Arc::new(resources::ResourceLeases::new()),
             tool_runtime: ToolRuntime::with_redactor(config.redactor.clone()),
             context: ContextManager::new(),
-            bus: EventBus::new(),
+            bus,
             config,
             sched: parking_lot::Mutex::new(SchedulerState::default()),
             notify: Notify::new(),
@@ -500,19 +507,31 @@ impl Runtime {
     }
 
     pub fn report_problem(&self, key: String, detail: String) {
-        let mut problems = self.problems.write();
-        if problems.get(&key) != Some(&detail) {
-            tracing::error!(%key, %detail);
-            problems.insert(key, detail);
-        }
+        self.problems.report(key, detail, None);
+    }
+
+    /// A problem that ends with its agent or task: the scheduler drops it
+    /// once the subject can no longer act, even when nothing cleared it.
+    pub(crate) fn report_problem_about(
+        &self,
+        subject: problems::Subject,
+        key: String,
+        detail: String,
+    ) {
+        self.problems.report(key, detail, Some(subject));
     }
 
     pub fn clear_problem(&self, key: &str) {
-        self.problems.write().remove(key);
+        self.problems.clear(key);
+    }
+
+    /// Drop the problems about subjects `keep` rejects. Returns how many.
+    pub(crate) fn retain_problems(&self, keep: impl Fn(problems::Subject) -> bool) -> usize {
+        self.problems.retain(keep)
     }
 
     pub fn problems(&self) -> Result<Vec<String>> {
-        let mut problems: Vec<_> = self.problems.read().values().cloned().collect();
+        let mut problems = self.problems.details();
         problems.extend(self.store.quarantines()?.into_iter().map(|q| q.reason));
         Ok(problems)
     }
@@ -550,7 +569,27 @@ impl Runtime {
     /// same seq first and the store rejects the whole commit. `push_inbox`
     /// asks for one, so the compiler carries the requirement to its callers.
     pub(crate) fn hold(&self) -> CommitHold<'_> {
-        self.commit_lock.hold()
+        // The writer ahead may be waiting out a locked database.
+        match self.commit_lock.try_hold() {
+            Some(hold) => hold,
+            None => self.off_the_async_worker(|| self.commit_lock.hold()),
+        }
+    }
+
+    /// Run `block`, which can wait out SQLite's busy timeout while another
+    /// process holds the database lock. With `store_writes_off_worker` the
+    /// worker first hands its queued tasks to another thread, so a locked
+    /// database does not also stall every socket the daemon answers.
+    fn off_the_async_worker<T>(&self, block: impl FnOnce() -> T) -> T {
+        // `block_in_place` panics on a current-thread runtime.
+        let multi_threaded = tokio::runtime::Handle::try_current().is_ok_and(|handle| {
+            handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread
+        });
+        if self.config.store_writes_off_worker && multi_threaded {
+            tokio::task::block_in_place(block)
+        } else {
+            block()
+        }
     }
 
     /// Whether a commit is being built right now; stale once read. Race tests
@@ -562,6 +601,30 @@ impl Runtime {
 
     /// Apply a commit built under `hold`, then publish.
     pub(crate) fn apply_held(&self, hold: CommitHold<'_>, commit: Commit) -> Result<Vec<Event>> {
+        self.apply_held_by(hold, commit, |store, commit| Ok(store.commit(commit)?))
+    }
+
+    /// `apply_held` for a turn's record that exists only in memory until it
+    /// lands: a locked database is waited out with the hold kept, so the same
+    /// commit lands in order (`turn::commit_through_lock`).
+    pub(crate) fn apply_held_through_lock(
+        &self,
+        hold: CommitHold<'_>,
+        commit: Commit,
+        agent_id: AgentId,
+        what: &'static str,
+    ) -> Result<Vec<Event>> {
+        self.apply_held_by(hold, commit, |store, commit| {
+            turn::commit_through_lock(store, &self.shutdown, commit, agent_id, what)
+        })
+    }
+
+    fn apply_held_by(
+        &self,
+        hold: CommitHold<'_>,
+        commit: Commit,
+        write: impl FnOnce(&dyn Store, Commit) -> Result<Vec<Event>>,
+    ) -> Result<Vec<Event>> {
         if commit.is_empty() {
             return Ok(Vec::new());
         }
@@ -576,7 +639,7 @@ impl Runtime {
                 .iter()
                 .find(|e| e.agent_id.is_some() && e.run.is_none())
         );
-        let events = self.store.commit(commit)?;
+        let events = self.off_the_async_worker(|| write(self.store.as_ref(), commit))?;
         // Published before the next commit can land, so subscribers see the
         // log in seq order; the send never blocks, so the hold stays short.
         for event in &events {
@@ -715,6 +778,8 @@ impl Runtime {
 
 #[cfg(test)]
 mod model_profile_tests;
+#[cfg(test)]
+mod store_writes_tests;
 #[cfg(test)]
 mod test_script;
 

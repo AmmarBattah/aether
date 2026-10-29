@@ -1125,7 +1125,10 @@ fn theme_view_lists_built_ins_then_files_and_starts_on_the_current_theme() {
         command(&actions[0]),
         &SlashCommand::SetTheme(all[at + 1].clone())
     );
-    assert!(closed(press(&mut view, &app, KeyCode::Esc)).is_empty());
+    assert!(matches!(
+        closed(press(&mut view, &app, KeyCode::Esc)).as_slice(),
+        [ViewAction::PreviewTheme(None)]
+    ));
     // A pinned variant is not listed: the cursor starts on its family.
     app.theme_choice = "gruvbox-light".parse().unwrap();
     let mut view = super::theme::ThemeView::new(&app);
@@ -1134,6 +1137,17 @@ fn theme_view_lists_built_ins_then_files_and_starts_on_the_current_theme() {
         command(&actions[0]),
         &SlashCommand::SetTheme("gruvbox".parse().unwrap())
     );
+    for c in "hidden".chars() {
+        press(&mut view, &app, KeyCode::Char(c));
+    }
+    assert!(matches!(
+        press(&mut view, &app, KeyCode::Down),
+        ViewOutcome::Consumed
+    ));
+    assert!(matches!(
+        press(&mut view, &app, KeyCode::Enter),
+        ViewOutcome::Consumed
+    ));
 }
 
 #[test]
@@ -1991,4 +2005,90 @@ fn usage_view_shows_remaining_credit_and_reset_time() {
         "{text}"
     );
     assert!(text.contains("custom-subscription"), "{text}");
+}
+
+/// Coloured swatch dots on the Nord and Gruvbox rows of `/theme` in `app`.
+fn palette_row_dots(app: &App) -> Vec<usize> {
+    let view = super::theme::ThemeView::new(app);
+    let terminal = draw(&view, app, 120);
+    let buffer = terminal.backend().buffer();
+    let dot = app.theme.glyphs().running;
+    let reset = ratatui::buffer::Cell::default().fg;
+    let width = buffer.area.width;
+    (0..buffer.area.height)
+        .filter_map(|y| {
+            let row: String = (0..width).map(|x| buffer[(x, y)].symbol()).collect();
+            (row.contains("Nord, follows") || row.contains("Gruvbox, follows")).then(|| {
+                (0..width)
+                    .map(|x| &buffer[(x, y)])
+                    .filter(|cell| cell.symbol() == dot && cell.fg != reset)
+                    .count()
+            })
+        })
+        .collect()
+}
+
+fn mono_app(no_color_theme: bool) -> App {
+    let mut app = viewed_app();
+    app.theme = Theme::resolve(ThemeSpec {
+        mode: ThemeMode::Mono,
+        depth: ColorDepth::Truecolor,
+        ..Default::default()
+    });
+    app.theme_choice = "mono".parse().unwrap();
+    app.options.no_color_theme = no_color_theme;
+    app
+}
+
+#[test]
+fn theme_picker_swatches_keep_their_own_colours_while_mono_is_chosen() {
+    let counts = palette_row_dots(&mono_app(false));
+    assert_eq!(counts.len(), 2, "expected the Nord and Gruvbox rows");
+    assert!(counts.iter().all(|&n| n > 0), "{counts:?}");
+}
+
+#[test]
+fn theme_picker_swatches_stay_colourless_when_no_color_chose_mono() {
+    assert_eq!(palette_row_dots(&mono_app(true)), [0, 0]);
+}
+
+#[test]
+fn swatches_keep_their_colours_during_a_live_mono_preview() {
+    let mut app = viewed_app();
+    app.theme = Theme::resolve(ThemeSpec {
+        depth: ColorDepth::Truecolor,
+        ..app.theme.spec()
+    });
+    let original = app.theme.spec();
+    let choice = app.theme_choice.clone();
+    app.preview_theme(Some("mono".parse().unwrap()));
+    assert_eq!(app.theme.spec().mode, ThemeMode::Mono);
+    assert_eq!(app.theme_choice, choice);
+    let counts = palette_row_dots(&app);
+    assert_eq!(counts.len(), 2);
+    assert!(counts.iter().all(|&n| n > 0));
+    app.preview_theme(None);
+    assert_eq!(app.theme.spec(), original);
+}
+
+#[test]
+fn theme_filter_previews_enabled_rows_and_ignores_missing_matches() {
+    let app = viewed_app();
+    let mut view = super::theme::ThemeView::new(&app);
+    let actions = acted(press(&mut view, &app, KeyCode::Char('n')));
+    assert!(matches!(
+        actions.as_slice(),
+        [ViewAction::PreviewTheme(Some(_))]
+    ));
+    for c in "zzzz".chars() {
+        press(&mut view, &app, KeyCode::Char(c));
+    }
+    assert!(matches!(
+        press(&mut view, &app, KeyCode::Down),
+        ViewOutcome::Consumed
+    ));
+    assert!(matches!(
+        press(&mut view, &app, KeyCode::Enter),
+        ViewOutcome::Consumed
+    ));
 }

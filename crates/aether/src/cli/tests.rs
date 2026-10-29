@@ -224,8 +224,8 @@ fn the_argv_a_client_spawns_parses_as_a_detached_foreground_daemon() {
     use clap::Parser as _;
 
     let socket = PathBuf::from("/run/user/1000/aether/aetherd.sock");
-    let command =
-        daemon_command(&socket, true, Some(4), true).expect("this test executable has a path");
+    let command = daemon_command(&socket, None, true, Some(4), true)
+        .expect("this test executable has a path");
     let argv: Vec<&std::ffi::OsStr> = std::iter::once(std::ffi::OsStr::new("aether"))
         .chain(command.get_args())
         .collect();
@@ -246,6 +246,28 @@ fn the_argv_a_client_spawns_parses_as_a_detached_foreground_daemon() {
     assert!(foreground, "the child is the daemon, not another launcher");
     assert!(detached, "and it must know that nobody reads its stderr");
     assert_eq!((yolo, max_concurrent, allow_remote), (true, Some(4), true));
+}
+
+/// A detached daemon ran in the launcher's directory whatever `--workspace`
+/// said: the flag never reached the child's argv.
+#[test]
+fn the_spawned_daemon_argv_carries_the_workspace() {
+    use clap::Parser as _;
+
+    let socket = PathBuf::from("/run/user/1000/aether/aetherd.sock");
+    let beta = PathBuf::from("/home/someone/beta");
+    for (workspace, expected) in [(Some(beta.as_path()), Some(&beta)), (None, None)] {
+        let command = daemon_command(&socket, workspace, false, None, false)
+            .expect("this test executable has a path");
+        let argv: Vec<&std::ffi::OsStr> = std::iter::once(std::ffi::OsStr::new("aether"))
+            .chain(command.get_args())
+            .collect();
+        let parsed = crate::Args::try_parse_from(argv).expect("the spawned argv must parse");
+        let Some(crate::Cmd::Daemon { workspace, .. }) = parsed.command else {
+            panic!("the spawned argv must name the daemon subcommand");
+        };
+        assert_eq!(workspace.as_ref(), expected);
+    }
 }
 
 /// `--detached` only describes how a foreground daemon was started, so on
@@ -608,6 +630,21 @@ fn approval_takes_none_or_a_list_of_classes() {
             .to_string(),
         "approval class must be read_only, idempotent_mutation, mutation, external or none: writes"
     );
+}
+
+#[test]
+fn a_gate_without_idempotent_mutation_warns_that_file_writes_stay_open() {
+    for spec in ["mutation,external", "external", "read_only"] {
+        let warning = ungated_writes(&parse_approval(spec).unwrap()).expect(spec);
+        assert!(warning.contains("add idempotent_mutation"), "{warning}");
+    }
+    for spec in ["none", "idempotent_mutation,mutation,external"] {
+        assert_eq!(
+            ungated_writes(&parse_approval(spec).unwrap()),
+            None,
+            "{spec}"
+        );
+    }
 }
 
 #[test]

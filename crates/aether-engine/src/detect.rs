@@ -92,6 +92,9 @@ pub enum DetectError {
     TimedOut { program: String, probe: String },
     /// The OS could not start it - not on `PATH`, or another spawn failure.
     NotInstalled { program: String, os_error: String },
+    /// The probe's scratch state directory could not be created, so the CLI
+    /// was not run: a temp-storage problem, not the CLI's.
+    ScratchUnavailable { program: String, os_error: String },
     /// It started but exited non-zero.
     ExitFailure {
         program: String,
@@ -127,6 +130,10 @@ impl std::fmt::Display for DetectError {
                 f,
                 "{program} is not installed or not on PATH ({os_error}); install {program}"
             ),
+            Self::ScratchUnavailable { program, os_error } => write!(
+                f,
+                "could not create a scratch directory to probe {program} in ({os_error}); point TMPDIR at a writable directory with free space"
+            ),
             Self::ExitFailure {
                 program,
                 status,
@@ -161,31 +168,51 @@ impl std::fmt::Display for DetectError {
 
 impl std::error::Error for DetectError {}
 
+/// Why `kind`'s CLI is no longer an executable on this process's `PATH`, if
+/// it is not: a cheap check that a CLI probed usable earlier is still there.
+/// An engine with no CLI of its own has nothing to lose, so it is present.
+pub fn missing_cli(kind: crate::EngineKind) -> Option<DetectError> {
+    let program = if kind == crate::EngineKind::CLAUDE_CODE {
+        "claude"
+    } else if kind == crate::EngineKind::CODEX {
+        "codex"
+    } else {
+        return None;
+    };
+    if crate::offline::executable_on_path(program, std::env::var_os("PATH").as_deref()) {
+        return None;
+    }
+    Some(DetectError::NotInstalled {
+        program: program.to_owned(),
+        os_error: "no executable of that name in any PATH directory".to_owned(),
+    })
+}
+
+/// The variable naming the directory Codex keeps its state in. Codex
+/// creates files there on any start, `--version` included.
+pub(crate) const CODEX_STATE_ENV: &str = "CODEX_HOME";
+
 /// Run `<program> --version` (optionally searching `path` instead of the
 /// process's own `PATH`, for deterministic tests) and parse its version.
+/// `state_env` names the variable of a CLI that writes state on every start;
+/// the probe points it at a scratch directory removed afterwards.
 pub(crate) async fn probe_version(
     program: &str,
     path: Option<&Path>,
+    state_env: Option<&str>,
 ) -> Result<EngineVersion, DetectError> {
-    probe_version_with_args(program, &["--version"], path).await
+    probe_version_with_args(program, &["--version"], path, state_env).await
 }
 
 async fn probe_version_with_args(
     program: &str,
     args: &[&str],
     path: Option<&Path>,
+    state_env: Option<&str>,
 ) -> Result<EngineVersion, DetectError> {
-    let mut command = tokio::process::Command::new(program);
-    command
-        .args(args)
-        .stdin(std::process::Stdio::null())
-        .kill_on_drop(true);
-    if let Some(path) = path {
-        command.env("PATH", path);
-    }
-    let output = tokio::time::timeout(PROBE_TIMEOUT, command.output())
-        .await
-        .map_err(|_| DetectError::TimedOut {
+    let output = run_probe(program, args, path, state_env)
+        .await?
+        .ok_or_else(|| DetectError::TimedOut {
             program: program.to_owned(),
             probe: "--version".into(),
         })?
@@ -215,18 +242,11 @@ pub(crate) async fn probe_capability(
     capability_args: &[&str],
     capability: &str,
     path: Option<&Path>,
+    state_env: Option<&str>,
 ) -> Result<(), DetectError> {
-    let mut command = tokio::process::Command::new(program);
-    command
-        .args(capability_args)
-        .stdin(std::process::Stdio::null())
-        .kill_on_drop(true);
-    if let Some(path) = path {
-        command.env("PATH", path);
-    }
-    let output = tokio::time::timeout(PROBE_TIMEOUT, command.output())
-        .await
-        .map_err(|_| DetectError::TimedOut {
+    let output = run_probe(program, capability_args, path, state_env)
+        .await?
+        .ok_or_else(|| DetectError::TimedOut {
             program: program.to_owned(),
             probe: capability_args.join(" "),
         })?
@@ -243,6 +263,67 @@ pub(crate) async fn probe_capability(
         });
     }
     Ok(())
+}
+
+/// Run one probe with no stdin, its output captured; `None` once it outlives
+/// [`PROBE_TIMEOUT`], when it is killed. Spawned like an engine, so a daemon
+/// killed mid-probe does not leave it behind, and its group ends with it.
+async fn run_probe(
+    program: &str,
+    args: &[&str],
+    path: Option<&Path>,
+    state_env: Option<&str>,
+) -> Result<Option<std::io::Result<std::process::Output>>, DetectError> {
+    use std::process::Stdio;
+
+    let mut command = tokio::process::Command::new(program);
+    command
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    if let Some(path) = path {
+        command.env("PATH", path);
+    }
+    // Removed when the probe ends, whatever it wrote there.
+    let _scratch = match state_env {
+        Some(name) => Some(scratch_state_dir(&mut command, name).map_err(|e| {
+            DetectError::ScratchUnavailable {
+                program: program.to_owned(),
+                os_error: e.to_string(),
+            }
+        })?),
+        None => None,
+    };
+    let (child, watch) = match crate::lifeline::spawn(command) {
+        Ok(spawned) => spawned,
+        Err(error) => return Ok(Some(Err(error))),
+    };
+    // Whatever the probe started, a wrapper's own CLI included, goes with it,
+    // also when this future is dropped mid-probe.
+    let _group_end = watch.ending_on_drop();
+    let output = tokio::time::timeout(PROBE_TIMEOUT, child.wait_with_output())
+        .await
+        .ok();
+    Ok(output)
+}
+
+/// Point `name` at a fresh private directory for `command`'s run.
+fn scratch_state_dir(
+    command: &mut tokio::process::Command,
+    name: &str,
+) -> std::io::Result<tempfile::TempDir> {
+    assert!(!name.is_empty(), "a state variable needs a name");
+    let dir = tempfile::Builder::new()
+        .prefix("aether-engine-probe-")
+        .tempdir()?;
+    debug_assert!(
+        dir.path().is_dir(),
+        "the CLI requires the directory to exist"
+    );
+    command.env(name, dir.path());
+    Ok(dir)
 }
 
 #[cfg(test)]

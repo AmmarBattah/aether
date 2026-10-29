@@ -9,6 +9,7 @@ mod blocking_reads;
 #[cfg(unix)]
 mod credential_directory;
 mod device_gate;
+mod export_run;
 mod history_expiry;
 mod pipelined;
 mod provider_usage;
@@ -62,7 +63,8 @@ fn expired_history_is_a_visible_missing_history_error_not_internal_failure() {
         last_seq: 10,
     };
     let reply = store_err(error);
-    assert_eq!(reply.code, ErrorCode::NotFound);
+    assert_eq!(reply.code, ErrorCode::HistoryExpired);
+    assert_eq!(reply.expired_span(), Some(2..=10));
     assert!(reply.message.contains("history expired"));
     assert!(reply.message.contains("2..=10"));
     let runtime = map_err(RuntimeError::Store(
@@ -178,21 +180,29 @@ async fn daemon_with_network(
     store: Arc<dyn aether_store::Store>,
     network: aether_core::agent::NetworkPolicy,
 ) -> (Daemon, tempfile::TempDir) {
+    daemon_with_config(store, |config| config.network_default = network).await
+}
+
+pub(super) async fn daemon_with_config(
+    store: Arc<dyn aether_store::Store>,
+    configure: impl FnOnce(&mut aether_runtime::RuntimeConfig),
+) -> (Daemon, tempfile::TempDir) {
     let config_dir = tempfile::tempdir().expect("config dir");
     let models = Arc::new(
         aether_model::Models::load(Some(config_dir.path().to_path_buf())).expect("models"),
     );
+    let mut config = aether_runtime::RuntimeConfig {
+        holder: "test".into(),
+        default_model: Some(aether_core::model::ModelRef::new(
+            "anthropic",
+            "claude-sonnet-5-5",
+        )),
+        attachment_dir: Some(config_dir.path().join("attachments")),
+        ..Default::default()
+    };
+    configure(&mut config);
     let runtime = aether_runtime::Runtime::start_with_engines(
-        aether_runtime::RuntimeConfig {
-            holder: "test".into(),
-            network_default: network,
-            default_model: Some(aether_core::model::ModelRef::new(
-                "anthropic",
-                "claude-sonnet-5-5",
-            )),
-            attachment_dir: Some(config_dir.path().join("attachments")),
-            ..Default::default()
-        },
+        config,
         store,
         models.clone(),
         Arc::new(aether_tools::ToolRegistry::with_builtins()),
@@ -294,6 +304,7 @@ async fn pause_resume_and_set_answer_the_shapes_the_client_expects() {
                 deadline: Some(DeadlineUpdate::Clear),
                 ..Default::default()
             },
+            subtree: false,
             idempotency_key: None,
         },
         Actor::user(),

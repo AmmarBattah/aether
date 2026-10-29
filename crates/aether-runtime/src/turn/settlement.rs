@@ -135,7 +135,11 @@ pub(super) async fn settle_resolved_approvals(
                 },
                 Err(e) => EventKind::ToolFailed {
                     call: result.call.id,
-                    error: e.to_string(),
+                    error: runtime
+                        .tool_runtime
+                        .redactor()
+                        .redact(&e.to_string())
+                        .into_owned(),
                     retryable: e.is_retryable(),
                     duration_ms: ran.then_some(duration),
                 },
@@ -152,14 +156,20 @@ pub(super) async fn settle_resolved_approvals(
     Ok(())
 }
 
-/// The outcome committed for this call's key while driving its invocation.
+/// The outcome committed for this call's key while driving its invocation,
+/// masked again: it may predate masking or a secret the runtime knows now.
 pub(super) fn replayable(runtime: &Runtime, call: &ToolCall) -> Result<Option<RecordedOutcome>> {
     let (Some(key), Some(invocation)) = (&call.idempotency_key, call.invocation_id) else {
         return Ok(None);
     };
-    Ok(runtime
+    let recorded = runtime
         .store
-        .recorded_outcome(call.agent_id, invocation, call.id, key)?)
+        .recorded_outcome(call.agent_id, invocation, call.id, key)?;
+    Ok(recorded.map(|mut recorded| {
+        debug_assert_eq!(&recorded.key, key, "the store answers for this key");
+        aether_tools::redact_outcome(runtime.tool_runtime.redactor(), &mut recorded.outcome);
+        recorded
+    }))
 }
 
 /// What to record so a re-drive of this call replays instead of running.
@@ -256,6 +266,7 @@ pub(super) fn compose_tool_results(runtime: &Runtime, ctx: &TurnCtx) -> Result<(
         .values()
         .map(|call| (call.provider_call_id.as_str(), call))
         .collect();
+    let redactor = runtime.tool_runtime.redactor();
     let mut blocks = Vec::with_capacity(ids.len());
     for provider_id in &ids {
         let Some(call) = by_provider_id.get(provider_id.as_str()) else {
@@ -264,9 +275,12 @@ pub(super) fn compose_tool_results(runtime: &Runtime, ctx: &TurnCtx) -> Result<(
         let Some((text, is_error)) = settled.get(&call.id) else {
             return Ok(()); // still pending
         };
+        // Masked again: an outcome recorded before masking, or before its
+        // secret was known, must not reach the provider as stored.
+        let text = redactor.redact(text).into_owned();
         blocks.push(ContentBlock::ToolResult {
             tool_use_id: provider_id.clone(),
-            content: vec![ToolResultBlock::Text { text: text.clone() }],
+            content: vec![ToolResultBlock::Text { text }],
             is_error: *is_error,
         });
     }

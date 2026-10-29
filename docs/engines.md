@@ -362,8 +362,8 @@ Claude and Codex choose their own effort when the agent has no explicit setting
 and the model declares no `default_effort`. Codex adapters omit both the
 command-line effort override and the app-server turn effort field in that case.
 Explicit agent effort still passes through, independently of registry
-capability flags, and always beats a model default. GPT-6.1 Sol declares
-`default_effort = "high"` (Codex's own default is low), so `codex/sol` launches
+capability flags, and always beats a model default. GPT-6.1 Terra and Sol declare
+`default_effort = "high"` (Codex's own default is low), so `codex/terra` launches
 at high unless asked otherwise; the default is applied per turn, never written
 to the agent's config.
 
@@ -711,6 +711,28 @@ A timeout reports which probe failed; timeout or caller cancellation kills the
 direct child instead of leaving the probe running. These are local CLI checks,
 not model calls. The bound is per probe, not a deadline for total daemon startup.
 
+The probes leave the user's home as they found it. Codex creates files
+under its state directory on any start, `--version` included (for example
+`~/.codex/tmp`). Its probes therefore run with `CODEX_HOME` pointing at a fresh
+private directory under the system temp dir, removed when the probe ends.
+When that directory cannot be created, Codex is not run, and the reason
+names `TMPDIR` rather than advising an install.
+`claude --version` writes nothing and runs as is. `aether doctor` runs only
+these probes, so in an empty `HOME` it creates nothing outside Aether's own
+directories.
+
+An engine that fails preflight is not ruled out for the daemon's life. When
+a turn, a compaction, a delegation or the creation of a started agent needs an engine that
+detection found unusable, or one whose CLI has since left `PATH`, the
+daemon probes that CLI again first. A CLI installed, upgraded or fixed
+since startup is then used without a restart, and one removed since is
+refused with an install hint. Probes of one engine run at most once every two seconds, and
+callers arriving meanwhile share the latest outcome. A started agent
+(`aether run`) whose engine is still unusable is refused before it exists,
+with the probe's reason. A parked agent (`aether new`) is still created: its
+CLI may be installed before it runs. Spawn schedules and their runs are not
+refused either: each run's first turn probes the CLI again.
+
 A version floor is only ever a registration gate (`DetectError::TooOld`) once
 it is independently verified for everything that adapter's `args()` sends on
 every turn - not just one turn kind. Claude Code's 2.1.219 floor is verified
@@ -736,11 +758,15 @@ back to `CodexEngine` only on its failure, logging both reasons together when
 neither works (collapsed to one when they are identical, the common
 CLI-simply-absent case). `aether doctor`'s engines check reports the same
 per-adapter reason instead of a bare "not found", including the
-legacy-fallback reason for Codex; a turn dispatched onto an engine detection
-ruled unusable fails with that same reason rather than a generic
-"not installed" message. Detection never makes the daemon refuse to start: a
+legacy-fallback reason for Codex; a turn dispatched onto an engine still
+unusable after its fresh probe fails with that probe's reason rather than a
+generic "not installed" message. Detection never makes the daemon refuse to start: a
 CLI that fails preflight is omitted from the engine table, exactly as an
-absent one always was, and the API providers remain unaffected. `DetectError`
+absent one always was, and the API providers remain unaffected. Nor does it
+delay the socket: the daemon answers first and detects the engines, Claude
+Code and Codex at once, in the background. Until detection finishes,
+`aether status` shows its engines as `starting` and requests that would use
+an engine wait for it ([startup order](../ARCHITECTURE.md)). `DetectError`
 keeps `TooOld` for a future adapter whose floor genuinely is verified across
 everything its `args()` depends on; Claude Code's own floor does not use it.
 

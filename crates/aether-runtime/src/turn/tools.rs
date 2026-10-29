@@ -32,13 +32,18 @@ pub(super) async fn delegation_refusal(
                 let protocol = resolved.provider.protocol;
                 let engine_ready = match crate::turn_engine::engine_kind(protocol) {
                     None => true,
-                    Some(kind) => runtime.engines.get(&kind).is_some_and(|engine| {
-                        engine
-                            .validate_network_policy(
-                                network == aether_core::agent::NetworkPolicy::Allowed,
-                            )
-                            .is_ok()
-                    }),
+                    Some(kind) => runtime
+                        .engines
+                        .ready()
+                        .await
+                        .get(&kind)
+                        .is_some_and(|engine| {
+                            engine
+                                .validate_network_policy(
+                                    network == aether_core::agent::NetworkPolicy::Allowed,
+                                )
+                                .is_ok()
+                        }),
                 };
                 let configured = runtime
                     .models
@@ -383,15 +388,7 @@ pub(super) async fn run_tool_calls(
     let mut replays: Vec<(ToolCall, RecordedOutcome)> = Vec::new();
     let mut to_run = Vec::with_capacity(runnable.len());
     for (call, tool) in runnable {
-        let recorded = match (&call.idempotency_key, call.invocation_id) {
-            (Some(key), Some(invocation)) => {
-                runtime
-                    .store
-                    .recorded_outcome(call.agent_id, invocation, call.id, key)?
-            }
-            _ => None,
-        };
-        match recorded {
+        match replayable(runtime, &call)? {
             Some(recorded) => replays.push((call, recorded)),
             None => to_run.push((call, tool)),
         }
@@ -498,9 +495,12 @@ pub(super) async fn run_tool_calls(
                     })))?;
                 }
                 Err(e) => {
+                    // A tool's error can quote what it read, like its output.
+                    let error = e.to_string();
+                    let error = runtime.tool_runtime.redactor().redact(&error);
                     runtime.apply(Commit::new().event(ctx.draft(EventKind::ToolFailed {
                         call: result.call.id,
-                        error: e.to_string(),
+                        error: error.into_owned(),
                         retryable: e.is_retryable(),
                         duration_ms: ran.then_some(duration),
                     })))?;

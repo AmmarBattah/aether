@@ -190,7 +190,14 @@ Everything you send goes to the viewed agent.
 Each agent keeps its own draft: switching to another agent parks your text,
 pasted blocks and image chips, and selecting the first agent again brings them back.
 
+With no model configured, Enter keeps your request in the composer. The
+`no model to run on yet · /login` hint stays until the next key.
+
 ### Images
+
+A message the host refuses (for example, images sent to a host older than
+protocol 19) returns to that agent's draft with its images. A message whose
+delivery is uncertain also returns to the draft and is never resent automatically.
 
 A message can carry images (a screenshot, a diagram) next to its text. There
 are three ways to attach one, and each adds a chip above the draft,
@@ -337,6 +344,13 @@ attached to it sees the same center, updated live. A daemon from before the
 center shows no indicator, and Alt+N says the daemon has none. See
 [the protocol](protocol.md#notification-center) for posting from a service.
 
+From a shell or a script, `aether notify list` prints the open notifications,
+newest first, one line each: id, kind, age and title. `--all` adds the
+resolved ones and `--json` prints the records as the protocol returns them.
+`aether notify resolve <id>` resolves one, and `aether notify resolve --all`
+resolves every open one and prints how many. An id the daemon does not know
+exits non-zero.
+
 ## Views
 
 Commands that need more than a line open a view in the bottom pane:
@@ -358,11 +372,14 @@ hue; everything else holds still.
 | `auto` | default: Aether's own colours, light or dark from the terminal background |
 | `dark`, `light` | Aether's colours, forced to one background |
 | `nord`, `catppuccin`, `gruvbox`, `tokyo-night` | built-in palettes; add `-dark` or `-light` to pin one (`catppuccin-mocha`, `catppuccin-latte` and `tokyo-night-day` also work) |
-| `mono` | weight, dim and reverse only; also chosen when `NO_COLOR` is set |
+| `mono` | weight, dim and reverse only; also chosen when `NO_COLOR` is set. `/theme` still previews the other themes in colour unless `NO_COLOR` chose `mono` |
 | any other name | a theme file, below |
 
-`/theme` lists every theme with a swatch of its colours on your terminal;
-Enter uses one and saves it to `ui.toml` as `theme = "<name>"`. `/theme <name>`
+`/theme` lists every theme with a swatch of its colours on your terminal
+(colourless when `NO_COLOR` chose `mono`).
+Moving through the list previews each theme across the whole screen. Enter keeps
+it and saves it to `ui.toml` as `theme = "<name>"`; Esc restores the original
+theme (clear an active filter first). `/theme <name>`
 does the same directly, and `/settings` steps through the built-ins. For one
 run use `--theme` (also `AETHER_THEME`). The flag wins over `NO_COLOR`, which
 wins over the saved choice. `dusk`, `dawn` and `monochrome` are still accepted
@@ -374,7 +391,14 @@ When the terminal reports its background, each hue is made readable against it
 and rules are blended from the terminal's own colours. Colours are reduced to
 the terminal's depth: 256-colour terminals get the nearest palette entry, and
 16-colour terminals use their own basic colours, so there every palette looks
-the same.
+the same. At 256 colours the user-message band picks the nearest entry that
+still stands out from the probed background.
+
+`COLORTERM=truecolor` enables truecolor. SSH does not normally forward
+`COLORTERM`, so when `TERM` claims 256 colours Aether also asks the terminal
+at startup using DECRQSS and XTGETTCAP. If the terminal does not confirm
+support, set `COLORTERM=truecolor` on the host, or configure SSH
+`SendEnv COLORTERM` and server `AcceptEnv COLORTERM`.
 
 ### Theme files
 
@@ -485,6 +509,7 @@ These removals are intentional. The daemon capabilities remain available:
 | Event timeline and timeline search | `aether events` (including follow/filter options) |
 | `/approve`, `/deny`, including batch answers | `aether approvals` lists pending IDs; `aether approve <approval>` / `aether deny <approval>`, or `--all-pending --run <run>` for a scoped batch |
 | `/always`, `/never`, tool-wide rules and remembered refusals | `aether rules list\|allow\|deny\|revoke`; TUI `y/a/p/n` answer one prompt |
+| Notification panel (`/notifications`, Alt+N) listing and resolving | `aether notify list [--all] [--json]`; `aether notify resolve <id>\|--all` |
 | GitHub-watcher view | `aether github-watcher` |
 | Notice history | Client failures persist as error cells in the current transcript; daemon events are available through `aether events` |
 | Memory curation Activity tab | `aether events`; `/memory` Enter opens full record details |
@@ -575,7 +600,7 @@ List, popup, board navigation and approval keys stay fixed.
 | `Ctrl+G` | go to the agents board, opening it if hidden |
 | `Ctrl+B` | show / hide the agents board |
 | `Ctrl+O` | switch workspace: view its agent, or start one there |
-| `Alt+O` | files in the focused or latest message |
+| `Alt+O` | files in the focused or nearest message with references |
 | `Alt+E` | open the viewed file externally |
 | `Alt+W` | close the file viewer |
 | `Alt+Z` | toggle full screen file viewer |
@@ -861,7 +886,8 @@ from a bounded journal, so unchanged frames do not rescan hidden history.
 ## Local file viewer
 
 **Alt+O** lists local file references in the last clicked message, or the
-latest message when none is focused. Bare paths, Markdown links and local
+nearest recent message with file references (looking up to 64 messages back)
+when none is focused. Bare paths, Markdown links and local
 `file://` links are supported. Click a highlighted reference without dragging
 to open it; dragging continues to select text. The viewed agent's own
 workspace resolves relative paths, including a child's separate workspace.

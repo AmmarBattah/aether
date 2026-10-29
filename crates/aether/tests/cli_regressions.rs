@@ -82,6 +82,14 @@ struct Stub {
     /// before the command and answer history pages; the rest follow `compact`.
     compaction_log: Vec<Event>,
     compaction_cursor: u64,
+    /// While the root works, its child and grandchild and an agent another
+    /// client placed in the run ask for approval (see `run_asks`).
+    run_family: bool,
+    /// The agent is mid-turn on an approval nobody has answered.
+    awaiting_approval: bool,
+    /// Every approval the CLI answers had already ended, as one whose turn
+    /// ended expires before an answer lands.
+    expired_approvals: bool,
 }
 impl Default for Stub {
     fn default() -> Self {
@@ -105,6 +113,9 @@ impl Default for Stub {
             viewed: None,
             compaction_log: Vec::new(),
             compaction_cursor: 0,
+            run_family: false,
+            awaiting_approval: false,
+            expired_approvals: false,
         }
     }
 }
@@ -220,7 +231,7 @@ async fn cli_with_socket(
                     device: None,
                     submission_horizon: None,
                 })),
-                Command::Subscribe { query, .. } if run_created && query.agent.is_some() => {
+                Command::Subscribe { query, .. } if run_created && query.run.is_some() => {
                     Ok(Reply::Subscribed { id: 1, last_seq: 0 })
                 }
                 Command::Subscribe { .. } => {
@@ -320,6 +331,8 @@ async fn cli_with_socket(
                     source: Some(HOSTILE.into()), methods: vec![HOSTILE.into()], subscription: false,
                     detail: None, program: None,
                 }])),
+                // `auth` asks which keyless servers to probe; none here.
+                Command::Providers => Ok(Reply::Providers(Vec::new())),
                 Command::ListApprovalRules { .. } => Ok(Reply::ApprovalRules(vec![
                     aether_core::approval::ApprovalRule {
                         id: aether_core::id::ApprovalRuleId::new(),
@@ -378,6 +391,23 @@ async fn cli_with_socket(
                     .collect(),
                 )),
                 Command::GetAgent { id } if *id == agent().id => Ok(Reply::Agent(agent())),
+                Command::GetAgent { id } if run_asks::member(*id).is_some() => {
+                    Ok(Reply::Agent(run_asks::member(*id).unwrap()))
+                }
+                Command::ResolveApproval { id, decision, .. } => {
+                    run_asks::check_resolution(*id, *decision);
+                    if stub.expired_approvals {
+                        Err(ErrorReply::invalid(format!("approval {id} already resolved")))
+                    } else {
+                        Ok(Reply::Ok)
+                    }
+                }
+                Command::ListApprovals => Ok(Reply::Approvals(
+                    stub.awaiting_approval
+                        .then(run_asks::root_approval)
+                        .into_iter()
+                        .collect(),
+                )),
                 Command::GetAgent { .. } => {
                     Err(ErrorReply::new(ErrorCode::NotFound, "unknown agent"))
                 }
@@ -458,7 +488,13 @@ async fn cli_with_socket(
                         listing(unreported),
                     ]))
                 }
-                Command::ListAgents { .. } => Ok(Reply::Agents(vec![agent()])),
+                Command::ListAgents { .. } => {
+                    let mut listed = agent();
+                    if stub.awaiting_approval {
+                        listed.status = aether_core::agent::AgentStatus::Running;
+                    }
+                    Ok(Reply::Agents(vec![listed]))
+                }
                 Command::ListTasks { .. } => {
                     let mut task =
                         Task::new("Do work", Actor::user(), RunId::new(), AT.parse().unwrap());
@@ -660,8 +696,13 @@ async fn cli_with_socket(
                 run_created = true;
                 continue;
             }
-            if matches!(frame.command, Command::Subscribe { ref query, .. } if run_created && query.agent.is_some())
+            if matches!(frame.command, Command::Subscribe { ref query, .. } if run_created && query.run.is_some())
             {
+                if stub.run_family {
+                    for frame in run_asks::family_frames() {
+                        write_frame(&mut write, frame).await;
+                    }
+                }
                 if stub.reinvoked {
                     for text in ["STARTED", "FINISHED"] {
                         write_frame(
@@ -2329,6 +2370,9 @@ mod proposal_lookup_tests;
 #[path = "cli_regressions/memory_feedback.rs"]
 mod feedback_cli_tests;
 
+#[path = "cli_regressions/notify.rs"]
+mod notify_cli_tests;
+
 #[path = "cli_regressions/events.rs"]
 mod events;
 
@@ -2485,3 +2529,9 @@ fn diagnose_without_out_names_its_own_bundle_directory() {
             .starts_with("aether-diagnose-")
     );
 }
+
+#[path = "cli_regressions/command_polish.rs"]
+mod command_polish;
+
+#[path = "cli_regressions/run_asks.rs"]
+mod run_asks;

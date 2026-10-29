@@ -75,6 +75,16 @@ pub async fn agents(
         println!("{}", serde_json::to_string_pretty(&rows)?);
         return Ok(());
     }
+    // An engine waits on approval mid-turn, so its status alone says running.
+    let asking: std::collections::HashSet<_> = client
+        .list_approvals()
+        .await?
+        .into_iter()
+        .map(|approval| approval.agent_id)
+        .collect();
+    // The scheduler starts no turn while the disk is below its floor, so a
+    // ready agent is waiting on that, not about to run.
+    let disk_low = client.status().await?.low_disk.is_some();
     // Cache reads are their own column: folded into `in` they let a
     // cache-dominated total read as fresh input nobody had paid full price for.
     let glyphs = Glyphs::new(super::display_ascii(ascii)?);
@@ -90,35 +100,71 @@ pub async fn agents(
         head("out", 8, true),
     );
     for a in rows {
-        println!(
-            "{} {} {} {} {} {} {} {}",
-            head(&a.id.to_string(), 32, false),
-            head(&a.name, 14, false),
-            head(&agent_status_label(&a, glyphs), 28, false),
-            head(&a.chain().to_string(), 28, false),
-            number(a.stats.usage.input_tokens, 8),
-            number(a.stats.usage.cache_read_tokens, 8),
-            number(a.stats.usage.output_tokens, 8),
-            a.current_task.map(|t| t.to_string()).unwrap_or_default()
-        );
+        let holds = Holds {
+            paused: a.paused,
+            asking: asking.contains(&a.id),
+            disk_low,
+        };
+        println!("{}", agent_row(&a, holds, glyphs));
     }
     Ok(())
 }
 
+fn agent_row(a: &aether_core::agent::Agent, holds: Holds, glyphs: Glyphs) -> String {
+    let head = |text: &str, width, right| cell(text, width, glyphs, right);
+    format!(
+        "{} {} {} {} {} {} {} {}",
+        head(&a.id.to_string(), 32, false),
+        head(&a.name, 14, false),
+        head(&agent_status_label(&a.status, holds, glyphs), 28, false),
+        head(&a.chain().to_string(), 28, false),
+        number(a.stats.usage.input_tokens, 8),
+        number(a.stats.usage.cache_read_tokens, 8),
+        number(a.stats.usage.output_tokens, 8),
+        a.current_task.map(|t| t.to_string()).unwrap_or_default()
+    )
+}
+
+/// What holds an agent back beyond its own status.
+#[derive(Clone, Copy, Default)]
+struct Holds {
+    paused: bool,
+    /// One of its approvals is pending.
+    asking: bool,
+    /// The daemon starts no turn until the disk has room again.
+    disk_low: bool,
+}
+
 /// A pause is orthogonal to the status: a paused agent mid-turn is still
 /// running, and saying only "paused" would be a lie.
-fn agent_status_label(a: &aether_core::agent::Agent, glyphs: Glyphs) -> String {
-    let kind = if matches!(
-        &a.status,
-        aether_core::agent::AgentStatus::Blocked {
-            reason: aether_core::agent::BlockReason::Exhausted { .. }
+fn agent_status_label(
+    status: &aether_core::agent::AgentStatus,
+    holds: Holds,
+    glyphs: Glyphs,
+) -> String {
+    use aether_core::agent::{AgentStatus, BlockReason, WaitCondition};
+    let on_approval = matches!(
+        status,
+        AgentStatus::Waiting {
+            condition: WaitCondition::Approval { .. }
+        }
+    );
+    let kind = if (holds.asking || on_approval) && !status.is_terminal() {
+        "waiting: approval".to_owned()
+    } else if holds.disk_low && matches!(status, AgentStatus::Ready) {
+        "waiting: disk low".to_owned()
+    } else if matches!(
+        status,
+        AgentStatus::Blocked {
+            reason: BlockReason::Exhausted { .. }
         }
     ) {
-        format!("{} {} exhausted", a.status.kind(), glyphs.separator())
+        format!("{} {} exhausted", status.kind(), glyphs.separator())
     } else {
-        a.status.kind().to_string()
+        status.kind().to_string()
     };
-    if a.paused {
+    debug_assert!(!kind.is_empty());
+    if holds.paused {
         format!("{kind} {} paused", glyphs.separator())
     } else {
         kind
@@ -372,4 +418,37 @@ pub async fn resume(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Glyphs, Holds, agent_status_label};
+    use aether_core::agent::AgentStatus;
+
+    #[test]
+    fn a_ready_agent_on_a_low_disk_says_it_waits_for_the_disk() {
+        let glyphs = Glyphs::new(false);
+        let low = Holds {
+            disk_low: true,
+            ..Holds::default()
+        };
+        assert_eq!(
+            agent_status_label(&AgentStatus::Ready, low, glyphs),
+            "waiting: disk low"
+        );
+        assert_eq!(
+            agent_status_label(&AgentStatus::Ready, Holds::default(), glyphs),
+            "ready"
+        );
+        let running = agent_status_label(&AgentStatus::Running, low, glyphs);
+        assert_eq!(running, "running", "a turn already started keeps running");
+        let paused = Holds {
+            paused: true,
+            ..low
+        };
+        assert_eq!(
+            agent_status_label(&AgentStatus::Ready, paused, glyphs),
+            "waiting: disk low · paused"
+        );
+    }
 }

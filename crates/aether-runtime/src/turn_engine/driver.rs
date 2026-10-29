@@ -1,4 +1,6 @@
 //! Native engine driver.
+use std::collections::VecDeque;
+
 use super::{
     Arc, BACKGROUND_GRACE, BTreeSet, BusMessage, CancellationToken, Commit, ContentBlock, Crossed,
     DeltaKind, Engine, EngineEvent, EngineOutcome, EngineRequest, EngineTurn, EventKind,
@@ -297,6 +299,8 @@ pub(super) async fn drive(
     // then released to be served.
     let mut deferred: Option<(EngineRequest, tokio::time::Instant)> = None;
     let mut released: Option<EngineRequest> = None;
+    // Events that arrived while an approval wait watched for the engine leaving.
+    let mut kept: VecDeque<EngineEvent> = VecDeque::new();
     // The park's stop runs on its own timer (`Park::arm_stop`); this is only
     // how the loop learns that it fired.
     let (stop_fired_tx, mut stop_fired_rx) = mpsc::channel::<()>(1);
@@ -390,7 +394,7 @@ pub(super) async fn drive(
                 flush_accounting(runtime, ctx, &mut state.accounting)?;
                 subtree.note_own_commits(runtime.store.commits().saturating_sub(commits_before));
             }
-            ev = run.events.recv() => {
+            ev = next_event(&mut run.events, &mut kept) => {
                 touch_pending = true;
                 if ev.as_ref().is_some_and(|event| state.accounting.flush_before(event)) {
                     // Held readings precede what this commits, and are never
@@ -514,7 +518,11 @@ pub(super) async fn drive(
                     }
                 }
                 Some(EngineEvent::InputAccepted) => {
-                    if let Some(pending) = steering.outstanding.pop_front() {
+                    if park.is_some() {
+                        // Taken in after the turn's end was decided, only to be stopped:
+                        // the model never acts on it, so it stays queued and wakes the next turn.
+                        steering.rewind(ctx.agent.inbox_cursor);
+                    } else if let Some(pending) = steering.outstanding.pop_front() {
                         record_consumed(runtime, ctx, pending)?;
                     }
                     // The engine is answering it; its next result decides.
@@ -549,6 +557,7 @@ pub(super) async fn drive(
                                 GateSubject::from_prompt(runtime, ctx, &tool, &tool_input, declared, tool_input["tool_use_id"].as_str())?,
                                 cancel,
                                 true,
+                                native_asker_gone(decisions.as_ref(), &mut run.events, &mut kept),
                             )
                             .await?
                         }
@@ -558,6 +567,17 @@ pub(super) async fn drive(
                             request_id,
                             allow: verdict.allow,
                             message: verdict.message,
+                            answer: None,
+                        }).await;
+                    }
+                }
+                Some(EngineEvent::Question { request_id, .. }) if park.is_some() => {
+                    // An inbox answer would be consumed by a process being stopped; it waits instead.
+                    if let Some(tx) = decisions.as_ref() {
+                        let _ = tx.send(PermissionDecision {
+                            request_id,
+                            allow: false,
+                            message: Some(TURN_IS_OVER.to_owned()),
                             answer: None,
                         }).await;
                     }
@@ -766,7 +786,7 @@ pub(super) async fn drive(
                             .then(|| (req.name.clone(), req.input.clone()));
                         let (tool, tool_input) = (req.name.clone(), req.input.clone());
                         let served =
-                            handle_request(runtime, ctx, tool_ctx, req, effects, cancel, park.is_some(), !background.is_empty())
+                            handle_request(runtime, ctx, tool_ctx, req, effects, cancel, park.is_some(), !background.is_empty(), engine_left(&mut run.events, &mut kept))
                                 .await?;
                         if let Served::Ran(Some(result)) = &served {
                             state.remember_bridge_reply(tool, tool_input, result.clone());
@@ -882,7 +902,7 @@ pub(super) async fn drive(
                     activity_seen = true;
                     let _ = request.reply.send((TURN_IS_OVER.to_owned(), true));
                 },
-                event = run.events.recv() => match event {
+                event = next_event(&mut run.events, &mut kept) => match event {
                     None => {
                         cleaned_up = true;
                         break;
@@ -1005,6 +1025,56 @@ pub(super) async fn drive(
         uncommitted,
         stalled,
     })
+}
+
+/// The engine's next event, after any an approval wait kept back.
+async fn next_event(
+    events: &mut mpsc::Receiver<EngineEvent>,
+    kept: &mut VecDeque<EngineEvent>,
+) -> Option<EngineEvent> {
+    match kept.pop_front() {
+        Some(event) => Some(event),
+        None => events.recv().await,
+    }
+}
+
+/// Completes once the engine closed its stream or reported its result, so a
+/// bridge call's approval cannot outlive it. What arrives meanwhile is kept,
+/// in order, for the loop.
+async fn engine_left(events: &mut mpsc::Receiver<EngineEvent>, kept: &mut VecDeque<EngineEvent>) {
+    let done = |event: &EngineEvent| matches!(event, EngineEvent::Done(_));
+    if kept.iter().any(done) {
+        return;
+    }
+    while let Some(event) = events.recv().await {
+        let finished = done(&event);
+        kept.push_back(event);
+        if finished {
+            return;
+        }
+    }
+}
+
+/// Completes once a native prompt's answer can no longer reach the engine:
+/// it dropped its answer channel, or it left the turn while keeping that open.
+async fn native_asker_gone(
+    decisions: Option<&mpsc::Sender<PermissionDecision>>,
+    events: &mut mpsc::Receiver<EngineEvent>,
+    kept: &mut VecDeque<EngineEvent>,
+) {
+    tokio::select! {
+        () = answers_dropped(decisions) => {}
+        () = engine_left(events, kept) => {}
+    }
+}
+
+/// Completes once the engine has dropped the channel its permission answers
+/// arrive on; never for an engine that takes answers another way.
+async fn answers_dropped(decisions: Option<&mpsc::Sender<PermissionDecision>>) {
+    match decisions {
+        Some(tx) => tx.closed().await,
+        None => std::future::pending().await,
+    }
 }
 
 fn observe_closing(

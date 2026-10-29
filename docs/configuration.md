@@ -25,7 +25,7 @@ completed_run_days = 10
 
 - **Model tiers:** every model carries a capability band within its provider,
   reported as `tier` by `list_models`: `fast` (Haiku, Luna), `balanced`
-  (Sonnet, Sol), `strong` (Opus, Astra) or `frontier` (Fable; Codex has none
+  (Sonnet, Terra, Sol), `strong` (Opus, Astra) or `frontier` (Fable; Codex has none
   today), or null when it cannot be ranked. A provider may lack a tier. The
   tier comes from, in order: `[models.tiers]` in `config.toml`
   (`"provider/model" = "fast" | "balanced" | "strong" | "frontier"`, aliases
@@ -59,6 +59,20 @@ completed_run_days = 10
 Daemon configuration changes generally require a restart. GitHub watcher
 settings are stored in the daemon database and can be changed live.
 
+## Model aliases
+
+`aether models` shows full model IDs. Either a full ID or an alias works in
+`provider/model` settings and `--model`. Aliases follow the registry's current
+family version; use a full ID to pin a version.
+
+- `anthropic` and `claude-code`: `opus`, `opus-5-5`, `opus-5.5` →
+  `claude-opus-5-5`; `sonnet`, `sonnet-5-5`, `sonnet-5.5` →
+  `claude-sonnet-5-5`; `haiku`, `haiku-5-5`, `haiku-5.5` →
+  `claude-haiku-5-5`; `fable`, `fable-5-1` → `claude-fable-5-1`.
+- `openai`, `openai-responses`, `openai-codex` and `codex`: `astra` →
+  `gpt-6-astra`; `terra`, `gpt-5.6-terra` → `gpt-6.1-terra`; `sol` →
+  `gpt-6.1-sol`; `luna` → `gpt-6-luna`.
+
 ## Common settings
 
 These settings live in `config.toml`; dotted names identify the TOML
@@ -66,7 +80,7 @@ section and key. Omitted settings use the shipped defaults.
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `model.default` | Balanced-tier model of the first ready provider (`claude-code/claude-sonnet-5-5`, `codex/gpt-6.1-sol`), which is priced | Choose the default `provider/model`. A malformed value fails config load; an unknown model is refused when an agent is created, naming the valid choices. It is never replaced silently. |
+| `model.default` | Balanced-tier model of the first ready provider (`claude-code/claude-sonnet-5-5`, `codex/gpt-6.1-terra`), which is priced | Choose the default `provider/model`. A malformed value fails config load; an unknown model is refused when an agent is created, naming the valid choices. It is never replaced silently. |
 | `providers.usage_stale_after` | `900` | Seconds before cached provider usage is stale; zero marks reports stale as soon as time advances. |
 | `providers.usage_refresh_interval` | `600` | Minimum seconds between explicit refresh attempts for one provider; must be positive. |
 | `providers.usage_refresh_timeout` | `15` | Probe deadline in seconds; must be positive. |
@@ -302,13 +316,21 @@ lists these under `bridge_copies`. No setting changes this.
 
 Eligible clean delegated workspaces are removed after the grace period, without
 waiting fourteen days. Ownership comes from an agent's workspace root at or
-inside that workspace, the manifest delegator's ancestor/descendant chain,
-or an explicit resource lease or integration. A broad ancestor scope or
-`allowed_paths` permission alone does not establish ownership. A live,
-Failed or Cancelled workspace owner, integration journal, dirty files, or
-commits not saved on another source-repository ref protect the workspace
-regardless of age. Read-only Git probes run before the runtime gate; GC
-rechecks filesystem identity and admission under the runtime locks.
+inside that workspace, the manifest delegator and its descendants, or an
+explicit resource lease or integration. The delegator's ancestors and a broad
+scope or `allowed_paths` permission alone do not establish ownership. Every
+owner must be stopped: a live or paused owner, one with a turn, lease or
+resource in flight, an integration journal, dirty files, or commits not saved
+on another source-repository ref protect the workspace regardless of age. A
+Failed or Cancelled child counts as stopped once its delegator has ended too,
+since nothing can then wake, restart or integrate it. When the source checkout
+the workspace was made from is gone, the delegator no longer protects it
+either: GC then runs Git in the repository's common Git directory. After a
+removal GC runs `git worktree prune` in the source repository, and a failed
+prune is named in that workspace's report entry. Waking or restarting an agent
+whose workspace was collected is refused. Read-only Git probes run before the
+runtime gate; GC rechecks filesystem identity and admission under the runtime
+locks.
 Ignored files and paths it cannot safely inspect may also protect a workspace;
 retention never overrides the work-preservation checks. Inventory and cleanup
 are bounded per pass, so large directories may take several sweeps and byte
@@ -485,6 +507,26 @@ during the grace, the reap stops, so its next engine is spared. A daemon
 shutdown does not end its agents, so it skips this reap: it stops each running
 engine's process group, as for any interrupted turn, and only processes that
 left that group keep running until their agent ends after the restart.
+
+A daemon that dies without a clean shutdown (killed with `SIGKILL`, out of
+memory, crashed) takes its engines with it on Linux. Each engine process, and
+each engine version probe, starts with a parent-death signal, so the kernel
+sends it `SIGKILL` when the daemon dies. Its process group also holds a small
+`/bin/sh` watchdog reading a pipe that only the daemon holds open; when the
+daemon dies the pipe closes and the watchdog kills the whole group. It
+ignores `SIGTERM`, so a daemon killed while stopping a group still kills it,
+and the engine does not start until its watchdog is in the group. That
+takes the processes the engine started in its group, such as the native CLI
+a wrapper like the npm `codex` launcher starts, and its shell commands. A
+version probe's group is killed as soon as the probe ends. The MCP bridge
+exits when its engine's pipe closes. The next daemon start kills what left
+the group: every recorded engine process group whose leader still has the
+recorded pid and kernel start time, and every process of
+the daemon's user carrying a recorded engine's random token. It never
+signals a process it cannot tie to an engine it started. macOS has neither a
+parent-death signal nor a readable start time. There, an engine left by a
+killed daemon runs until it exits on its own, and the next start reaps
+nothing. Stop the daemon with `aether stop` rather than killing it.
 
 ```toml
 [agents]

@@ -26,6 +26,35 @@ fn a_secret_in_structured_output_is_redacted_at_every_depth() {
     );
 }
 
+#[test]
+fn a_secret_in_an_object_key_is_redacted_and_no_field_is_lost() {
+    let (first, second) = (
+        "fleet-token-0123456789abcdef",
+        "other-token-fedcba9876543210",
+    );
+    let redactor = Redactor::with_known_secrets([first, second]).expect("compiles");
+    // Both secrets mask to the same key, which an existing key already
+    // holds along with its first numbered suffix.
+    let mut value = serde_json::json!({
+        "plain": 1,
+        "nested": [{
+            first: "first",
+            second: "second",
+            "[REDACTED:known_secret]": "existing",
+            "[REDACTED:known_secret] (2)": "numbered"
+        }],
+    });
+    super::redact_json(&redactor, &mut value);
+    let text = value.to_string();
+    assert!(!text.contains(first) && !text.contains(second), "{text}");
+    assert_eq!(value["plain"], 1);
+    let nested = value["nested"][0].as_object().expect("an object");
+    assert_eq!(nested.len(), 4, "no field is lost: {nested:?}");
+    let mut kept: Vec<&str> = nested.values().filter_map(|v| v.as_str()).collect();
+    kept.sort_unstable();
+    assert_eq!(kept, ["existing", "first", "numbered", "second"]);
+}
+
 use aether_core::id::{AgentId, ToolCallId};
 use aether_core::model::ToolSpec;
 use aether_core::tool::{ResourceKey, ToolOutcome};

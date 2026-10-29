@@ -720,7 +720,7 @@ why `host_only` is open to it; it gains none of the remote administration.
 | `get_agent` | observe | |
 | `list_agents` | observe | |
 | `get_tree` | observe | |
-| `update_agent` | operate | `host_only` when `patch.backend` or `patch.tools` is supplied. |
+| `update_agent` | operate | `host_only` when `patch.backend` or `patch.tools` is supplied; `subtree` needs nothing more. |
 | `reply_to_question` | operate | |
 | `send_message` | operate | The same with `attachments` (images). |
 | `append_note` | operate | Starts no turn. |
@@ -844,7 +844,11 @@ behavior.
   or hyphens. Its payload never grants operator standing; only a stored actor
   or the daemon's verified GitHub watcher may do that.
 - Both device roles can read fleet snapshots, transcripts, artifacts, replay,
-  MCP descriptions and events. Remote-administration events (`remote.*`)
+  MCP descriptions and events. Artifact bytes in a `read_artifact` reply are
+  masked by the daemon's redactor, known secret values included, for every
+  connection. Tool outcomes and errors are masked before they enter the event
+  log, but tool arguments are kept as typed; see
+  [known limitations](known-limitations.md#security-boundaries). Remote-administration events (`remote.*`)
   become `remote.restricted` with `{"redacted":true}` payloads on device
   connections, preserving sequence numbers while hiding fingerprints and
   revocation history. Token connections receive the same redaction. This
@@ -1889,8 +1893,8 @@ socket = "/run/user/1000/aether/aetherd.sock" # optional; host default otherwise
 - The TUI displays `box · connected` and the SSH host identity. Workspace
   choice, directory and `@` completion, and git summaries use the host-service
   protocol. Unsupported services display an explanation instead of examining
-  laptop paths. Remote `run` requires an explicit `--workspace`, validated on
-  the host; the remote TUI requires choosing a workspace before starting an
+  laptop paths. Remote `run` and `schedule create --objective` require an
+  explicit `--workspace`, validated on the host; the remote TUI requires choosing a workspace before starting an
   agent and does not create an automatic root.
 - Preferences, drafts, queued sends, cursors and the keyed outbox use
   `<configuration directory>/endpoints/<endpoint-and-instance digest>/`.

@@ -539,10 +539,6 @@ fn color_tokens(spec: ThemeSpec, background: Background) -> Tokens {
     let Some(p) = blendable else {
         return base;
     };
-    let tint = match background {
-        Background::Dark => blend(WHITE, p.bg, 0.07),
-        Background::Light => blend(BLACK, p.bg, 0.06),
-    };
     let quiet = blend(p.fg, p.bg, 0.55);
     let running = rgbs[Hue::Running as usize];
     let command = readable_rgb(
@@ -553,7 +549,7 @@ fn color_tokens(spec: ThemeSpec, background: Background) -> Tokens {
     Tokens {
         secondary: fg(quiet),
         command: fg(command),
-        tint: Some(best_color(tint, spec.depth)),
+        tint: Some(band_color(p.bg, spec.depth, background)),
         selection: Style::new().bg(best_color(
             blend(rgbs[Hue::Accent as usize], p.bg, SELECTION_ALPHA),
             spec.depth,
@@ -563,6 +559,37 @@ fn color_tokens(spec: ThemeSpec, background: Background) -> Tokens {
         shimmer: Some((quiet, running)),
         ..base
     }
+}
+
+const MIN_BAND_CONTRAST: f64 = 1.15;
+
+fn band_color(bg: Rgb, depth: ColorDepth, background: Background) -> Color {
+    debug_assert!(depth != ColorDepth::Basic16, "ANSI-16 shows no band");
+    let tint = match background {
+        Background::Dark => blend(WHITE, bg, 0.07),
+        Background::Light => blend(BLACK, bg, 0.06),
+    };
+    if depth == ColorDepth::Truecolor {
+        return best_color(tint, depth);
+    }
+    let bg_luminance = super::probe::luminance(bg);
+    let index = (16..=255u8)
+        .filter(|&index| {
+            let rgb = xterm_rgb(index);
+            let brighter = super::probe::luminance(rgb) > bg_luminance;
+            brighter == (background == Background::Dark)
+                && contrast_ratio(rgb, bg) >= MIN_BAND_CONTRAST
+        })
+        .min_by_key(|&index| {
+            let Rgb(r, g, b) = xterm_rgb(index);
+            u32::from(r.abs_diff(tint.0)).pow(2)
+                + u32::from(g.abs_diff(tint.1)).pow(2)
+                + u32::from(b.abs_diff(tint.2)).pow(2)
+        })
+        .unwrap_or_else(|| nearest_index(tint));
+    debug_assert!(index >= 16);
+    debug_assert!((0.0..=1.0).contains(&bg_luminance));
+    Color::Indexed(index)
 }
 
 /// `hue` from the overrides or the scheme, made readable on the probed bg.
@@ -734,6 +761,37 @@ mod tests {
             }
         }
         specs
+    }
+
+    #[test]
+    fn quantized_bands_remain_distinct_from_probed_backgrounds() {
+        for bg in [
+            Rgb(0x30, 0x0a, 0x24),
+            BLACK,
+            Rgb(0xf6, 0xf8, 0xfa),
+            Rgb(0, 0x2b, 0x36),
+        ] {
+            let palette = Some(TerminalPalette { fg: WHITE, bg });
+            let theme = Theme::resolve(spec(ThemeMode::Auto, ColorDepth::Indexed256, palette));
+            let Color::Indexed(index) = theme.tint().bg.unwrap() else {
+                panic!("indexed tint")
+            };
+            let rgb = xterm_rgb(index);
+            assert_ne!(index, nearest_index(bg));
+            assert!(contrast_ratio(rgb, bg) >= MIN_BAND_CONTRAST);
+            assert_eq!(
+                super::super::probe::luminance(rgb) > super::super::probe::luminance(bg),
+                theme.background() == Background::Dark
+            );
+            let basic = Theme::resolve(spec(ThemeMode::Auto, ColorDepth::Basic16, palette));
+            assert_eq!(basic.tint().bg, None, "ANSI-16 cannot show index {index}");
+            let theme = Theme::resolve(spec(ThemeMode::Auto, ColorDepth::Truecolor, palette));
+            let tint = match theme.background() {
+                Background::Dark => blend(WHITE, bg, 0.07),
+                Background::Light => blend(BLACK, bg, 0.06),
+            };
+            assert_eq!(theme.tint().bg, Some(Color::Rgb(tint.0, tint.1, tint.2)));
+        }
     }
 
     #[test]
@@ -952,6 +1010,7 @@ mod tests {
             basic.selected(),
             Style::new().add_modifier(Modifier::UNDERLINED)
         );
+        assert_eq!(basic.tint().bg, None);
         assert_eq!(basic.pulse(1.0), basic.running());
         assert_eq!(basic.shimmer(1.0), basic.secondary());
     }

@@ -22,7 +22,7 @@ aether run "Read this repository and explain its architecture" \
   --model claude-code/opus --effort medium
 
 aether run "Review the current diff without editing files" \
-  --model codex/sol --effort medium
+  --model codex/terra --effort medium
 ```
 
 Use `aether doctor`, `aether models`, and `aether providers` to inspect your
@@ -47,6 +47,15 @@ They can be copied into another shell without changing the target daemon. With t
 default socket selection, hints use plain `aether`. For paths that cannot
 be printed safely, hints ask you to reuse the original socket argument.
 
+`aether run` streams the root agent's reply and ends with the root's outcome;
+an agent it delegated to finishing does not end the command. Approval
+requests and questions from those agents (children, grandchildren and so on)
+are printed too, labelled with the agent that asked, with the command that
+answers them. `--yes` approves every request the root and its delegated agents
+make, and only theirs: a request from an agent another client placed in the
+same run is printed, never approved. A request that expired before `--yes`
+reached it is printed as already resolved, and the run goes on.
+
 When the run delegates, it also prints the subtree usage including descendants;
 the JSON result adds `subtree_usage` alongside the root's own `usage`.
 
@@ -59,12 +68,13 @@ resolves to `claude-fable-5-1`. Claude Code receives these explicit ids rather
 than its own floating aliases; `claude-code/default` leaves model selection to
 Claude Code itself.
 
-Built-in GPT models are GPT-6 Astra, GPT-6.1 Sol and GPT-6 Luna, preferred in
-that order, on `codex` and on the OpenAI API providers: `astra` resolves to
-`gpt-6-astra`, `sol` to `gpt-6.1-sol` and `luna` to `gpt-6-luna`.
-Automatic Codex selection uses Astra; choose capability first, then cost within
-the tier suitable for the task. Sol is the lower-cost option for demanding work
-and runs at high effort unless you pass `--effort` (Codex's own default is low);
+Built-in GPT models are GPT-6 Astra, GPT-6.1 Terra, GPT-6.1 Sol and GPT-6 Luna,
+preferred in that order, on `codex` and on the OpenAI API providers: `astra`
+resolves to `gpt-6-astra`, `terra` to `gpt-6.1-terra`, `sol` to `gpt-6.1-sol` and
+`luna` to `gpt-6-luna`. Choose capability first, then cost within the tier
+suitable for the task. Terra is the balanced-tier choice and the Codex default,
+at half Sol's price. Terra and Sol run at high effort unless you pass
+`--effort` (Codex's own default is low); Sol stays selectable by name.
 Luna is the low-cost option for focused work. Explicit model defaults and
 budgets are respected. `codex/default` delegates model selection to Codex. This
 is selection guidance, not a forced routing policy or a guarantee of identical
@@ -256,7 +266,10 @@ aether schedule create tick --every 5m --objective "check the build"
 aether schedule create ping --every 1h --target planner --payload "status?"
 ```
 
-`--every` takes a number of seconds or a unit (`90`, `30s`, `5m`, `2h`, `1d`).
+`--every` takes a number of seconds or a unit (`90`, `5m`, `2h`, `1d`) of at
+least one minute. A `--objective` schedule starts each run in the current
+directory, or in `--workspace PATH`; with `--remote` that flag is required and
+names a path on the host.
 `--payload` is optional with `--target`: JSON, or plain text sent as a string.
 `aether run` accepts `--token-budget`, `--cost-budget` and `--max-turns`; cache
 reads and writes count as tokens, so keep a Claude Code budget above 20k.
@@ -343,6 +356,19 @@ objects (including failed or cancelled runs), and doctor reports are unchanged.
 Streaming commands may already have emitted records before a terminal error
 object. Argument parsing errors retain Clap's stderr usage output and exit code 2.
 
+When another process holds the store's database lock (a backup or a `sqlite3`
+shell in a transaction, say), reads such as `aether agents` keep answering. A
+write waits SQLite's five-second busy timeout, after any write ahead of it,
+and is then refused with `unavailable` and "store busy: another process
+holds the database lock"; retry it once the lock clears. A running turn
+waits the lock out instead (up to two minutes per write), so the reply and
+usage it already has are kept.
+
+`aether wake AGENT_ID` restarts a failed agent. The failure the operator reads
+ends with what to run (`aether doctor`, `aether diagnose`); the agent is told
+only the cause and to retry its work, and its woken turn takes the next turn
+number.
+
 Run exports preserve evidence; imports do not automatically restart work.
 `aether task --owner AGENT_ID` requires a live agent without a current task.
 Agents created by `aether run` already own a task; create a taskless agent with
@@ -373,6 +399,28 @@ external side effects only; local file writes do not prompt. Before sending
 work to an agent, use `aether set AGENT_ID --approval
 idempotent_mutation,mutation,external` to also require approval for local
 mutations. Approval prompts are not a general filesystem sandbox.
+
+`--approval` takes `none` or a comma-separated list of the side-effect classes
+that wait for a person:
+
+| Class | What it covers |
+| --- | --- |
+| `read_only` | Reads and searches: `read_file`, `grep`, `glob`, Claude Code's `Read`, `Grep`, `Glob`. |
+| `idempotent_mutation` | File writes and edits: `write_file`, `edit_file`, `Write`, `Edit`, `MultiEdit`, `apply_patch`. |
+| `mutation` | Shell commands, background shells, delegation and every other tool not listed here. |
+| `external` | The network and outside services: `web_fetch`, and shell commands that reach a host (see below). |
+
+An unknown class is refused with the list of valid ones. A list without
+`idempotent_mutation` leaves file writes ungated, so `aether set` prints a note
+when one omits it: `--approval mutation,external` still lets Write and Edit run
+unprompted. `aether agents` shows `waiting: approval` for an agent held on an
+approval, mid-turn included.
+
+An approval belongs to the turn that asked. When that turn ends before anyone
+answers (interrupted, cancelled, failed, its engine exited, or lost to a
+daemon restart on a Claude Code or Codex agent, a fallback included), the approval is denied by the system with a note
+that starts `turn ended`, leaves `aether approvals` and the TUI, and can no
+longer be approved: the call it asked about will not run.
 
 Shell commands count as external when they may reach the network. Aether reads
 the command text, not what it does: it cuts the command at `;`, `&&`, `|`,
@@ -421,7 +469,8 @@ reliability target. See [known limits](known-limitations.md).
 ### View local files beside the conversation
 
 Click a file path or a Markdown file link in a message, or press **Alt+O**
-for the files in the last clicked message (otherwise the latest message).
+for the files in the clicked message, or else the nearest recent message
+with file references.
 Relative paths resolve in the viewed agent's workspace. Enter opens the
 selected file in a side pane; **Esc** (with the viewer focused) or **Alt+W** closes it. **Alt+- / Alt+=**
 resize it and **Alt+Z** toggles full screen. **Tab** moves focus between the

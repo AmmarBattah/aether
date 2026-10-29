@@ -143,6 +143,19 @@ impl App {
         Some(page_request(agent, before, self.connection))
     }
 
+    /// A client attached mid-turn saw nothing sent: what a running turn has not
+    /// taken yet is previewed again, whichever of history or tree came last.
+    pub(super) fn restore_steering(&mut self) {
+        for (agent, transcript) in &mut self.transcripts {
+            let running = self.tree.nodes.get(agent).is_some_and(|node| {
+                node.agent.status.kind() == aether_core::agent::AgentStatusKind::Running
+            });
+            if running {
+                transcript::restore_steering(transcript);
+            }
+        }
+    }
+
     /// Keep a live event for replay while any history is in flight.
     pub(super) fn backfill_note(&mut self, event: &Event) {
         if matches!(
@@ -247,7 +260,8 @@ impl App {
             !self.backfill.pages.contains_key(&agent),
             "a failed page is no longer in flight"
         );
-        let expired = matches!(error, ClientError::Protocol(reply)
+        let expired = error.expired_span().is_some()
+            || matches!(error, ClientError::Protocol(reply)
             if reply.code == aether_protocol::ErrorCode::NotFound
                 && reply.message.contains("history expired"));
         if before.is_none() || !expired {
@@ -389,6 +403,7 @@ impl App {
             }
         }
         transcript::bound_history(&mut self.transcripts, &ctx);
+        self.restore_steering();
         if pending.before.is_some() {
             self.flash("Reading older history; Ctrl+End returns to latest");
         }

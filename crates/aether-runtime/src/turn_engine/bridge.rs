@@ -30,11 +30,12 @@ pub(super) async fn handle_request(
     runtime: &Arc<Runtime>,
     ctx: &mut TurnCtx,
     tool_ctx: &Arc<ToolContext>,
-    req: EngineRequest,
+    mut req: EngineRequest,
     effects: &mut ToolEffects,
     cancel: &CancellationToken,
     parked: bool,
     native_jobs: bool,
+    engine_left: impl std::future::Future<Output = ()>,
 ) -> Result<Served> {
     let mut completed = req.name != "permission";
     if parked && req.name == "permission" {
@@ -50,7 +51,14 @@ pub(super) async fn handle_request(
         return Ok(Served::Refused);
     }
     let reply = if req.name == "permission" {
-        decide_permission(runtime, ctx, &req.input, cancel).await?
+        decide_permission(
+            runtime,
+            ctx,
+            &req.input,
+            cancel,
+            asker_gone(&mut req.reply, engine_left),
+        )
+        .await?
     } else {
         // Resolve through exactly the list the bridge advertised, so a tool
         // the bridge never offered cannot be reached by naming it.
@@ -79,12 +87,20 @@ pub(super) async fn handle_request(
                     resources: tool.resources(&req.input, tool_ctx),
                     resources_known: tool.resources_known(&req.input),
                 };
-                let verdict = permission_verdict(runtime, ctx, gate, cancel, !parked).await?;
+                let verdict = permission_verdict(
+                    runtime,
+                    ctx,
+                    gate,
+                    cancel,
+                    !parked,
+                    asker_gone(&mut req.reply, engine_left),
+                )
+                .await?;
                 if !verdict.allow {
                     let message = verdict
                         .message
                         .unwrap_or_else(|| "denied by the operator".to_owned());
-                    let reply = (message, true);
+                    let reply = masked_reply(runtime, (message, true));
                     let _ = req.reply.send(reply.clone());
                     return Ok(if parked {
                         Served::Refused
@@ -105,7 +121,7 @@ pub(super) async fn handle_request(
                             if let Some(error) =
                                 crate::turn::validate_wait(runtime, ctx, &condition, true)?
                             {
-                                let reply = (error.content, true);
+                                let reply = masked_reply(runtime, (error.content, true));
                                 let _ = req.reply.send(reply.clone());
                                 return Ok(Served::Ran(Some(reply)));
                             }
@@ -120,10 +136,11 @@ pub(super) async fn handle_request(
                         if parked
                             && !effects.admits_after_park(&action, ctx.agent.config.long_lived)
                         {
+                            // The refusal can quote the question it is waiting on.
                             let refusal = effects
                                 .refusal_for_asked(&action)
                                 .unwrap_or_else(|| TURN_IS_OVER.to_owned());
-                            let _ = req.reply.send((refusal, true));
+                            let _ = req.reply.send(masked_reply(runtime, (refusal, true)));
                             return Ok(Served::Refused);
                         }
                         // Ending the turn would stop the session's running jobs, so
@@ -166,6 +183,13 @@ pub(super) async fn handle_request(
             }
         }
     };
+    // A permission answer carries the input the engine runs, kept exact;
+    // `decide_permission` masks only its note.
+    let reply = if req.name == "permission" {
+        reply
+    } else {
+        masked_reply(runtime, reply)
+    };
     // Served during the wind-down: the result stands, and the stop leads it
     // so the engine does not read it as an invitation to continue. Prepended,
     // because a tool's structured payload is the reply's last line.
@@ -179,11 +203,32 @@ pub(super) async fn handle_request(
     Ok(Served::Ran(completed.then_some(reply)))
 }
 
+/// Completes once no answer can reach the asker: the bridge dropped the
+/// request, or the engine itself left the turn while its bridge still waits.
+async fn asker_gone(
+    reply: &mut tokio::sync::oneshot::Sender<(String, bool)>,
+    engine_left: impl std::future::Future<Output = ()>,
+) {
+    tokio::select! {
+        () = reply.closed() => {}
+        () = engine_left => {}
+    }
+}
+
 /// An action whose park only waits on an answer or a child, so its reply can
 /// wait instead while native jobs keep the session attached.
 fn held(action: &aether_tools::HarnessAction) -> bool {
     use aether_tools::HarnessAction as A;
     matches!(action, A::AskUser { .. } | A::Delegate { wait: true, .. })
+}
+
+/// The engine forwards a reply to its provider, so a tool's output, error or
+/// a denial note is masked before it leaves.
+fn masked_reply(runtime: &Runtime, reply: (String, bool)) -> (String, bool) {
+    match runtime.tool_runtime.redactor().redact(&reply.0) {
+        std::borrow::Cow::Borrowed(_) => reply,
+        std::borrow::Cow::Owned(clean) => (clean, reply.1),
+    }
 }
 
 /// A permission prompt answered "no", in the shape the engine's
@@ -221,6 +266,7 @@ async fn decide_permission(
     ctx: &TurnCtx,
     input: &Value,
     cancel: &CancellationToken,
+    asker_gone: impl std::future::Future<Output = ()>,
 ) -> Result<(String, bool)> {
     // Only reached while the turn is live; a parked turn denies before here.
     let tool_name = input
@@ -242,14 +288,16 @@ async fn decide_permission(
         )?,
         cancel,
         true,
+        asker_gone,
     )
     .await?;
     if !verdict.allow {
+        let message = verdict
+            .message
+            .as_deref()
+            .unwrap_or("denied by the operator");
         return Ok(denied_prompt(
-            verdict
-                .message
-                .as_deref()
-                .unwrap_or("denied by the operator"),
+            &runtime.tool_runtime.redactor().redact(message),
         ));
     }
     Ok((
@@ -343,13 +391,15 @@ pub(super) fn bridge_tool_name(name: &str) -> &str {
 }
 
 /// Allow silently when the agent's policy does not require approval for the
-/// class; otherwise raise an approval and wait for a person.
+/// class; otherwise raise an approval and wait for a person. `asker_gone`
+/// completes when the engine can no longer take the answer.
 pub(super) async fn permission_verdict(
     runtime: &Arc<Runtime>,
     ctx: &TurnCtx,
     gate: GateSubject<'_>,
     cancel: &CancellationToken,
     may_ask: bool,
+    asker_gone: impl std::future::Future<Output = ()>,
 ) -> Result<Verdict> {
     let GateSubject {
         native_call,
@@ -445,17 +495,22 @@ pub(super) async fn permission_verdict(
             }))
             .mutate(Mutation::PutApproval(approval.clone())),
     )?;
-    loop {
+    // From here the wait owns the approval: however it ends, it is answered
+    // or expired, never left pending for a later turn to grant.
+    let mut open = OpenApproval {
+        runtime,
+        id: approval.id,
+        open: true,
+    };
+    tokio::pin!(asker_gone);
+    let answer = loop {
         tokio::select! {
             msg = rx.recv() => match msg {
                 Ok(BusMessage::Event(e)) => {
                     if let EventKind::ApprovalResolved { approval: id, decision, note, .. } = &e.kind
                         && *id == approval.id
                     {
-                        return match decision {
-                            ApprovalDecision::Approved => Ok(allow()),
-                            ApprovalDecision::Denied => deny(note.as_deref().unwrap_or("denied by the operator")),
-                        };
+                        break (*decision, note.clone());
                     }
                 }
                 Ok(BusMessage::Delta { .. }) => {}
@@ -463,22 +518,57 @@ pub(super) async fn permission_verdict(
                     if let Some(a) = runtime.store.approval(approval.id)?
                         && let ApprovalStatus::Resolved { decision, note, .. } = a.status
                     {
-                        return match decision {
-                            ApprovalDecision::Approved => Ok(allow()),
-                            ApprovalDecision::Denied => deny(note.as_deref().unwrap_or("denied")),
-                        };
+                        break (decision, note);
                     }
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => return Ok(refuse("runtime shutting down")),
             },
             _ = cancel.cancelled() => {
-                if let Some(a) = runtime.store.approval(approval.id)?
-                    && let ApprovalStatus::Resolved { decision: ApprovalDecision::Denied, note, .. } = a.status
-                {
-                    return deny(note.as_deref().unwrap_or("denied by the operator"));
-                }
-                return Ok(refuse("cancelled"));
+                open.open = false;
+                return match runtime.expire_approval(approval.id, "interrupted or cancelled")? {
+                    Some(ApprovalStatus::Resolved { decision: ApprovalDecision::Denied, note, .. }) => {
+                        deny(note.as_deref().unwrap_or("denied by the operator"))
+                    }
+                    _ => Ok(refuse("cancelled")),
+                };
             },
+            () = &mut asker_gone => {
+                // Nobody is left to act on an answer, so none may be given.
+                open.open = false;
+                runtime.expire_approval(approval.id, "the engine stopped waiting for an answer")?;
+                return Ok(refuse("the engine exited while the approval was pending"));
+            },
+        }
+    };
+    open.open = false;
+    match answer {
+        (ApprovalDecision::Approved, _) => Ok(allow()),
+        (ApprovalDecision::Denied, note) => {
+            deny(note.as_deref().unwrap_or("denied by the operator"))
+        }
+    }
+}
+
+/// An approval a wait raised and has not seen answered. Dropping it open -
+/// the turn failed or was dropped mid-wait - expires the approval.
+struct OpenApproval<'a> {
+    runtime: &'a Arc<Runtime>,
+    id: ApprovalId,
+    open: bool,
+}
+
+impl Drop for OpenApproval<'_> {
+    fn drop(&mut self) {
+        if !self.open {
+            return;
+        }
+        // Drop cannot return the error; the agent's end or restart recovery
+        // expires what this could not.
+        if let Err(error) = self
+            .runtime
+            .expire_approval(self.id, "its wait was abandoned")
+        {
+            tracing::error!(approval = %self.id, %error, "could not expire an abandoned approval");
         }
     }
 }

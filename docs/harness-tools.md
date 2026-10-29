@@ -72,7 +72,7 @@ restart and wake preserve the existing agent’s recorded effort.
 
 `wait_for(wake_at=...)` schedules one timezone-qualified wake within one year;
 messages may wake the agent sooner. Recurrence uses `create_schedule` with
-`every_seconds` or a five-field `cron` expression and optional IANA `timezone`.
+`every_seconds` (at least 60) or a five-field `cron` expression and optional IANA `timezone`.
 Use `max_deliveries` to bound recurrence. A busy target skips the occurrence
 by default; `busy="queue_one"` delivers anyway but never stacks a second unread
 trigger. Trigger delivery does not imply task completion; inspect results and
@@ -156,7 +156,10 @@ After preserving the result and making the child worktree clean, use
 dirty worktrees without `--force`. The matching private metadata directory and
 `refs/aether/workspaces/<id>` (and `refs/aether/integrations/<id>` after an
 integration) also remain until explicitly removed. Keep them while you may
-need to inspect or retry integration.
+need to inspect or retry integration. Storage GC removes a clean, saved child
+worktree on its own once the child has stopped and its parent has ended or its
+source checkout is gone, and prunes the source repository's worktree list; see
+[storage](configuration.md#storage).
 
 Worktrees prevent ordinary concurrent edits from landing in the same working
 directory. They are not a filesystem sandbox: native CLI tools can access

@@ -100,10 +100,13 @@ pub async fn run(
         })
         .await?;
     initial.unsubscribe().await?;
+    // The whole run, so what a delegated agent asks reaches this command;
+    // streamed text and the outcome stay the root's.
     let query = EventQuery {
-        agent: Some(agent.id),
+        run: Some(agent.run),
         ..Default::default()
     };
+    let mut lineage = run_asks::Lineage::new(agent.id, agent.run);
     let mut sub = client
         .subscribe(Some(last_seq), query.clone(), true)
         .await?;
@@ -155,7 +158,7 @@ pub async fn run(
             None if socket.is_remote() => {
                 finish_stream(&mut out, &mut streaming)?;
                 let (connected, subscribed, snapshot) =
-                    reconnect_run(&socket, &client, &query, last_seq).await?;
+                    reconnect_run(&socket, &client, &query, agent.id, last_seq).await?;
                 client = connected;
                 sub = subscribed;
                 last_seq = sub.last_seq();
@@ -233,14 +236,12 @@ pub async fn run(
                         ..
                     } => {
                         if yes {
-                            client
-                                .resolve_approval(
-                                    *approval,
-                                    aether_core::tool::ApprovalDecision::Approved,
-                                    Some("auto".into()),
-                                )
-                                .await?;
-                            eprintln!("approved {}: {}", short(tool, 40), short(description, 120));
+                            let verb = if run_asks::auto_approve(&client, *approval).await? {
+                                "approved"
+                            } else {
+                                "already resolved, not approved:"
+                            };
+                            eprintln!("{verb} {}: {}", short(tool, 40), short(description, 120));
                         } else {
                             eprintln!(
                                 "approval needed for {}: {}\n  run: {command} approve {approval}",
@@ -290,6 +291,14 @@ pub async fn run(
                     _ => {}
                 }
             }
+            SubscriptionFrame::Event(event) => {
+                if let Some(line) =
+                    run_asks::other_agent_ask(&client, &mut lineage, &command, yes, &event).await?
+                {
+                    finish_stream(&mut out, &mut streaming)?;
+                    eprintln!("{line}");
+                }
+            }
             _ => {}
         }
     }
@@ -306,22 +315,9 @@ pub async fn run(
         .get(&agent.id)
         .ok_or_else(|| anyhow!("agent {} is missing from its run tree", agent.id))?;
     let subtree_usage = (!node.children.is_empty()).then_some(node.subtree_usage);
-    eprintln!(
-        "usage: {} in · {} cached · {} out · {} · {}",
-        u.input_tokens,
-        u.cache_read_tokens,
-        u.output_tokens,
-        turns_phrase(final_agent.stats.turns),
-        u.cost_and_estimate_line()
-    );
+    eprintln!("{}", usage_line(&u, Some(final_agent.stats.turns)));
     if let Some(total) = subtree_usage {
-        eprintln!(
-            "subtree usage: {} in · {} cached · {} out · {}",
-            total.input_tokens,
-            total.cache_read_tokens,
-            total.output_tokens,
-            total.cost_and_estimate_line()
-        );
+        eprintln!("{}", usage_line(&total, None));
     }
     if json {
         let mut result = serde_json::json!({
@@ -343,6 +339,15 @@ pub async fn run(
         "cancelled" => 3,
         _ => 0,
     })
+}
+
+fn usage_line(usage: &aether_core::model::Usage, turns: Option<u32>) -> String {
+    let tokens = usage.tokens_line(|n| n.to_string());
+    let cost = usage.cost_and_estimate_line();
+    match turns {
+        Some(turns) => format!("usage: {tokens} · {} · {cost}", turns_phrase(turns)),
+        None => format!("subtree usage: {tokens} · {cost}"),
+    }
 }
 
 fn turns_phrase(turns: u32) -> String {
@@ -390,7 +395,7 @@ fn agent_is_idle(condition: &aether_core::agent::WaitCondition) -> bool {
     matches!(condition, aether_core::agent::WaitCondition::Inbox)
 }
 
-async fn run_scope(
+pub(super) async fn run_scope(
     client: &aether_client::Client,
     endpoint: &aether_client::Endpoint,
     workspace: Option<PathBuf>,
@@ -442,17 +447,17 @@ async fn run_scope(
 mod run_notices;
 use run_notices::{GateWatch, retry_line};
 
+#[path = "run_asks.rs"]
+mod run_asks;
+
 #[path = "run_reconnect.rs"]
 mod run_reconnect;
 use run_reconnect::reconnect_run;
 
 async fn recovered_run_outcome(
     client: &aether_client::Client,
-    query: &EventQuery,
+    agent: aether_core::id::AgentId,
 ) -> anyhow::Result<Option<&'static str>> {
-    let agent = query
-        .agent
-        .ok_or_else(|| anyhow!("run reconnect has no agent"))?;
     let status = client.get_agent(agent).await?.status;
     Ok(match status {
         aether_core::agent::AgentStatus::Completed { .. } => Some("completed"),
@@ -493,8 +498,26 @@ fn with_login_guidance(error: &str) -> String {
 }
 
 #[cfg(test)]
-mod recovery_hint_tests {
+mod tests {
     use super::{subscription_ended_message, with_login_guidance};
+    #[test]
+    fn run_and_subtree_usage_include_cache_writes() {
+        let usage = aether_core::model::Usage {
+            input_tokens: 12,
+            cache_write_tokens: 34,
+            cache_read_tokens: 56,
+            output_tokens: 78,
+            ..Default::default()
+        };
+        let tokens = "12 in · 34 cache-write · 56 cached · 78 out";
+        assert!(
+            super::usage_line(&usage, Some(2))
+                .starts_with(&format!("usage: {tokens} · 2 turns · "))
+        );
+        assert!(
+            super::usage_line(&usage, None).starts_with(&format!("subtree usage: {tokens} · "))
+        );
+    }
 
     #[test]
     fn rejected_engine_login_names_the_login_command() {

@@ -62,7 +62,9 @@ pub(super) async fn dispatch(
             rt.archive_agents_keyed(target, archived, by, submission)
                 .map_err(map_err)?,
         )),
-        Command::UpdateAgent { id, patch, .. } => update_agent(daemon, id, patch, by, submission),
+        Command::UpdateAgent {
+            id, patch, subtree, ..
+        } => update_agent(daemon, id, patch, subtree, by, submission),
         Command::WorkspaceDiff { agent } => workspace_diff(daemon, agent).await,
         Command::WorkspaceIntegrate { agent } => workspace_integrate(daemon, agent, by).await,
         Command::WorkspaceDiscard { agent, force } => {
@@ -91,6 +93,20 @@ async fn create_agent(
     if rt.default_model().is_none() && req.model.is_none() {
         rt.set_default_model(daemon.models.default_model().await);
     }
+    // A parked agent may wait for its CLI to be installed; one started now cannot.
+    if req.start {
+        // A retry of a creation that succeeded is answered, not checked again.
+        if let Some(submission) = &submission
+            && let Some((agent, _)) = rt
+                .replay_created_agent(submission, by.clone())
+                .map_err(map_err)?
+        {
+            return Ok(Reply::Agent(agent));
+        }
+        rt.check_engine_for(req.model.as_ref(), req.parent)
+            .await
+            .map_err(map_err)?;
+    }
     let spec = CreateAgentSpec {
         role: req.role,
         name: req.name,
@@ -115,6 +131,7 @@ fn update_agent(
     daemon: &Daemon,
     id: aether_core::id::AgentId,
     patch: aether_protocol::AgentPatch,
+    subtree: bool,
     by: Actor,
     submission: Option<Submission>,
 ) -> Result<Reply, ErrorReply> {
@@ -138,7 +155,7 @@ fn update_agent(
         backend: patch.backend,
     };
     Ok(Reply::Agent(
-        rt.update_agent_keyed(id, update, by, submission)
+        rt.update_agent_keyed(id, update, subtree, by, submission)
             .map_err(map_err)?,
     ))
 }

@@ -6,6 +6,314 @@ release is also the text of its GitHub release.
 
 ## Unreleased
 
+## 1.2.7
+
+Released 2026-10-29. A patch release from the 2026-10-26 end-to-end sweep:
+engines die with a killed daemon (#313), an approval ends with its turn
+(#309), a held database lock no longer loses a turn's reply (#307), steered
+messages are neither skipped nor stranded (#306, #329), secrets are masked
+in full tool-output artifacts, `read_artifact` replies and exports (#308),
+and history expiry and per-turn checks stop scanning whole tables (#314).
+GPT-6.1 Terra is the Codex default. Protocol version 24, unchanged; the
+`subtree_update` and `history_expired` features are new and opt-in, and
+older clients see no change. Store schema 28 (was 27).
+
+### Before updating
+
+- Restart the daemon after the update (`aether stop`, then `aether`). Its
+  first start writes a pre-migration backup to `migration-backups/` and
+  migrates the store to schema 28 in place, which adds one index.
+- Aether 1.2.6 refuses a schema 28 store. To go back, stop the daemon and
+  restore the `schema-27-before-28` backup as described in
+  [Restoring a backup](docs/migration-backups.md#restoring-a-backup); what
+  happened after the upgrade is lost.
+- `codex` with no model named now runs `gpt-6.1-terra`; a configured
+  `codex/gpt-6.1-sol` is kept.
+- Scripts may notice three refusals: `aether run` exits non-zero and creates
+  no agent when its engine is missing or unusable, `--every` refuses an
+  interval under 60 seconds, and `aether daemon --workspace` refuses a path
+  that is not an existing directory.
+
+### Added
+
+- **`aether notify list` and `aether notify resolve` (#327).** The notification
+  center had protocol commands but no CLI, so nobody could see what "200
+  unread" held or clear it without Archon. `aether notify list [--all]
+  [--json]` prints the open notifications, newest first: id, kind, age and
+  title; `--all` adds resolved ones and `--json` prints the protocol records.
+  `aether notify resolve <id>` resolves one (an unknown id exits non-zero) and
+  `aether notify resolve --all` resolves every open one and prints the count.
+  No protocol change; it needs a daemon that announces `notifications`.
+- **GPT-6.1 Terra is the Codex default.** `gpt-6.1-terra` (alias `terra`) joins
+  `codex`, `openai`, `openai-responses` and `openai-codex` at $1 input, $0.05
+  cached input, $1.25 cache write and $5 output per Mtok, half of GPT-6.1
+  Sol's price. It is listed before Sol, so it is what `codex` picks when
+  nothing names a model and what the `balanced` tier resolves to; it runs at
+  high effort unless asked otherwise, as Sol does. Sol keeps its balanced tier
+  and stays selectable as `gpt-6.1-sol` or `sol`, and a configured
+  `codex/gpt-6.1-sol` is kept. `terra` and `gpt-5.6-terra` now resolve to
+  GPT-6.1 Terra instead of being retired to Luna.
+- **Extending a parent can extend its delegated children too (#323).** A
+  delegated child copies its parent's absolute deadline and cost budget, so
+  extending the parent alone left the child to be stopped, and its subtree
+  cancelled, at the old deadline. `update_agent` takes `subtree`: a patched
+  deadline or cost budget then also raises every live descendant whose own is
+  lower, in one transaction, and never shortens one. Daemons announce it as
+  the `subtree_update` feature, and the Rust client gains
+  `update_agent_subtree` and `serves_subtree_update`.
+- **Expired history has its own error code (#324).** A subscription or
+  `get_events` cursor behind history retention was refused with `not_found`
+  and a text message, so a host could not tell it from any other missing
+  record or learn which span was gone, and kept resubscribing from the same
+  cursor. A client that lists the new `history_expired` feature in its hello
+  now gets the `history_expired` code with `first_seq` and `last_seq`. Other
+  clients still get `not_found` with the same message, and a subscription
+  still ends its connection after the notice. The Rust client sends the
+  feature and gains `ClientError::code`, `ClientError::expired_span` and
+  `Client::expired_span`.
+
+### Changed
+
+- **Dependencies.** open 5.4.5, tokio 1.54.1, croner 4.0.2, pty-process 0.5.4
+  and pulldown-cmark 0.13.5; CI caches with Swatinem/rust-cache v2.9.3
+  (supersedes #319 and #320).
+
+### Fixed
+
+- **The phone app's schedule forms match the 60-second minimum.** The
+  interval fields now carry `min=60` and a hint, and the live web test
+  creates a 60-second schedule and checks that a shorter one shows the
+  daemon's refusal. The scheduling eval asks for a one-minute timer. A
+  skipped web browser or live check in `make ci` now prints a yellow banner.
+- **Engines die with the daemon, and preflight is current (#313).** A daemon
+  killed with `SIGKILL` left its engine processes running, reparented to
+  init, until the next start reaped them. This also happened to the test
+  suites' own daemons. On Linux every engine process and version probe now
+  starts with a parent-death signal, sent from one long-lived spawner thread
+  so that tokio retiring a worker thread cannot fire it early, and its
+  process group holds a watchdog that kills the group once the daemon's pipe
+  to it closes. A wrapper's own engine process, such as the native CLI the npm
+  `codex` launcher starts, dies too, and a version probe's group ends with
+  the probe, and an engine whose watchdog cannot start is not started. The
+  next start still reaps what left the group. macOS has no such signal;
+  [agent processes](docs/configuration.md#agent-processes) says what applies
+  there. An engine that failed preflight at startup is no
+  longer unusable until a restart: a turn, a compaction, a delegation or a
+  started agent that needs it probes the CLI again, at most every two seconds,
+  as it does for a usable CLI that has since left `PATH`; between probes a
+  CLI that left `PATH` is refused at once. A failure names the fresh reason
+  and says that no restart is needed. An agent whose approval policy gates
+  calls is refused, not run ungated, when the engine found for it can no
+  longer ask before acting, such as a Codex CLI replaced by an exec-only
+  build. `aether run` with a missing or unusable engine now exits non-zero
+  and creates no agent; spawn schedules are still accepted, and each run's
+  first turn probes again.
+  Messaging a failed agent names `aether wake <agent>` and
+  `aether restart <agent>`, and an engine killed by a signal with nothing on
+  stderr no longer ends its error with a dangling colon. `aether doctor` in
+  an empty `HOME` no longer creates `~/.codex/tmp`: the Codex probes run with
+  a scratch `CODEX_HOME` that is removed afterwards. When that directory
+  cannot be created, the reason names `TMPDIR` instead of advising an install.
+- **A held database lock no longer loses a turn's reply or hangs the CLI
+  (#307).** When another process held the store locked past SQLite's
+  five-second busy timeout, a turn that already had its answer failed with
+  "database is locked", dropping the reply and its usage. A turn now writes
+  its reply, its usage, a failed invocation and its end again with bounded
+  backoff, in order, until the lock clears; this covers Claude Code and Codex
+  turns as well as API ones. Each write waits up to two minutes; past that
+  the agent is recovered as after a restart, not failed. A daemon write, or
+  one waiting behind it, no longer stalls every other connection while it
+  waits: reads such as `aether agents` keep answering, and the write is
+  refused as `unavailable` "store busy" once its busy timeout passes. A
+  request the daemon still leaves unanswered times out after 60 seconds
+  with a message that names a locked database as a likely cause. `aether
+  wake` now tells the agent only the cause of its failure and to retry its
+  work; the advice to run `aether doctor` and `aether diagnose` stays in the
+  failure the operator reads. A turn that failed before recording an
+  invocation keeps its number, so replay labels the woken turn "turn 2"
+  instead of a second "turn 1".
+- **An approval ends with its turn, `aether run --yes` answers delegated
+  agents, and `--approval` names its classes (#309).** A Claude Code or
+  Codex agent waits on an approval inside its turn, but when that turn was
+  interrupted, cancelled or lost to a daemon restart the approval stayed
+  pending: it stayed in `aether approvals` and the TUI, and approving it
+  woke the agent, at the cost of a turn, for a call that no longer existed.
+  Now the approval is denied by the system with a note that starts
+  `turn ended` when its wait ends without an answer (the engine exiting
+  mid-wait included), when its agent is cancelled or fails, and when
+  restart recovery finds that an engine, a fallback included, ran the lost
+  turn that raised it; it leaves every list and can no longer be approved.
+  `aether run` watched only
+  its root agent, so a delegated agent's approval or question was never
+  shown and `--yes` never approved it, and the run stalled. It now follows
+  the whole run: approvals and questions from the root's children and
+  grandchildren are printed with the agent that asked, `--yes` approves
+  them as it approves the root's, and an agent another client placed in the
+  run is printed but never approved; the streamed reply and the outcome stay
+  the root's. `aether set --approval` help names each class and the tools it
+  covers, `aether set` notes when a list without `idempotent_mutation`
+  leaves file writes ungated, and `aether agents` shows `waiting: approval`
+  for an agent held on one, an engine agent mid-turn included.
+- **An answered engine question no longer loses an earlier steered
+  message (#306).** Answering a question recorded the reply consumed even
+  while a message steered before it was still unacknowledged; if the engine
+  then refused that message, it was skipped and never delivered. While a
+  steered message is outstanding, the question is now told the reply follows,
+  and the reply is steered right after it, so a refusal keeps both queued for
+  the next turn.
+- **A message taken in after a turn ended now wakes the agent (#329).** A
+  message steered into a Claude Code turn just before the model called a
+  turn-ending tool (`wait_for`, `ask_user`, a waiting `delegate`) was folded
+  in only after that call, and was then recorded consumed even though the
+  engine was being stopped. Nothing new was left to wake the agent, so it
+  waited forever. Such a message now stays queued and starts the next turn,
+  and a question the stopping engine asks is refused instead of being
+  answered from the inbox.
+- **Secrets are masked in full tool-output artifacts, `read_artifact` replies
+  and run exports (#308).** The event log masked the excerpt of a long tool
+  output, but the full copy stored as an artifact kept the text as printed,
+  an API agent's `read_artifact` outcome committed up to 64 KiB of that text
+  to the event log and sent it to the provider, and `aether runs export`
+  masked secret shapes but not the values the daemon knows (listener token,
+  MCP `token_env` values, provider keys). The runtime redactor, known secrets
+  included, now masks a tool's full output before it is stored. A shell log
+  is masked as a stream, so a large one is never held in memory, and its
+  chunks never split a known secret, a key block, or a bearer token or AWS
+  key assignment that spans lines. It also masks every harness outcome (as
+  data, before it is rendered) and tool error before it is committed, a
+  recorded outcome again when a re-driven call replays it or an interrupted
+  turn's tool results are composed from it, approval and rule notes and
+  revocation reasons when they are recorded, every tool reply, refusal and
+  denial note the native-engine bridge returns to the engine, object keys as
+  well as values in a tool's structured output, a known secret's
+  JSON-escaped spelling as well as its own, every `read_artifact` reply to
+  any connection, and every export record and payload. A `read_artifact`
+  page, a `ReadArtifact` reply cut at its `max_bytes` and a shell log line
+  cut at its size cap move the cut off any secret they see whole, and look
+  far enough for a long token, a key block or a bearer value after blank
+  space, so no part of it shows, within the limits the link below lists. An
+  export a known secret would leave unimportable is refused. An artifact a
+  client publishes is still stored as sent and masked on each of those ways out; the shell's
+  own output log on disk stays raw for the agent. See
+  [known limitations](docs/known-limitations.md#security-boundaries).
+- **History expiry no longer judges whole tables under the commit gate
+  (#314).** Expiring one finished run re-ran every retention guard, whole-table
+  scans of the inbox, agents, events and more, while holding the runtime's
+  commit gate and scheduler lock: about 165 ms per run with 100k inbox rows,
+  during which every commit and `status` waited. The run is still judged in
+  full beforehand, under no lock. Under the gate expiry now re-reads only the
+  run's own agents and tasks and the rows written since that judgement, and
+  judges in full again only when the run itself gained members or another
+  connection wrote to the store. Held time for that run drops to about 1 ms;
+  which runs expire and why the others are kept is unchanged. Schema version
+  28 adds an `approvals(agent_id)` index for those checks; stores upgrade in
+  place on first open.
+- **Turn, delegation and command checks read only the agents they need
+  (#314).** The per-turn budget check, the wake budget check, pause, resume,
+  `update_agent` with `subtree`, delegation validation and the inspection
+  scope decoded every agent the store had ever held, up to 230 ms per check
+  with 20k archived agents, and validation searched that list once per
+  subtree member. They now load the agent's subtree through one indexed
+  query, and the delegation cap advisory loads only the ancestry of the
+  delegating agent and of running turns: under 1 ms each at that scale.
+  Results are unchanged, including the completed, cancelled, paused and
+  archived descendants they count.
+- **The daemon answers its socket before probing engines (#326).** `aetherd`
+  used to run the Claude Code and Codex CLIs, resolve the default model, and
+  search the event log for an open low-disk warning before it bound its
+  socket, which took 6 to 9.5 seconds. It now binds as soon as the store is
+  open and recovery has finished, and detects the engines, both at once, and
+  the default model in the background. Until they finish, `aether status`
+  and `aether doctor` show the engines as `starting`, and a request that
+  would use an engine waits for them, or after 20 seconds gets a retryable
+  `unavailable`. The open low-disk state is now kept in store metadata, so a
+  restart reads it instead of scanning the log. The daemon log names each
+  startup phase and how long it took.
+- **Status, doctor and auth report current and correct state (#311).**
+  Problems about one agent (a stall, a failed budget, deadline or
+  scheduling check, a pending cancellation, a lease heartbeat) and about one
+  queued task (a dependency check) stayed in `aether status` and the doctor
+  after the agent ended or the task left the queue, until a restart; the
+  scheduler now drops them then. Memory curation (admit, accept, reject,
+  pin, forget, restore, retract) committed straight to the store and never
+  reached the event bus, so a client following events missed every
+  `memory.*` event; they are now published as they commit. `aether agents`
+  shows a ready agent as "waiting: disk low" while the disk is below its
+  floor, instead of "ready". `aether status` lists at most ten runs, the
+  ones spending now first, and sums up the rest in one line; `--json` still
+  lists every run. The daemon now marks its store while it runs and clears
+  the mark when it stops cleanly, and `aether doctor` has a `shutdown` check
+  that warns when the last run was killed, crashed or lost power, until the
+  next clean stop. `aether auth` probes keyless local servers as
+  `aether providers` and the doctor do: one nothing answers at is
+  "unreachable", one that answers with an empty model list is "no models"
+  (in all three), and one that serves models is "no auth needed" rather
+  than "ready". Its columns fit their longest entry, and a CLI sign-in that
+  is missing or expired reads "not signed in, run `aether login
+  claude-code`" instead of the CLI's raw output. No `--json` field changed.
+- **A detached daemon honours `--workspace`, remote spawn schedules run in a
+  host workspace, and `--every` has a one-minute minimum (#310).**
+  `aether daemon --workspace PATH` only worked with `--foreground`: the
+  detached daemon (the default) was started without the flag, so new root
+  agents were scoped to the directory it was started from, and a path that
+  did not exist was accepted. The path is now resolved where the command
+  runs, refused there when it is not an existing directory, and passed to
+  the detached daemon as an absolute path. `aether schedule create
+  --objective` recorded the client's current directory as each run's
+  workspace, a laptop path on a remote host. It now takes `--workspace`,
+  which `--remote` requires and which the host validates and canonicalizes
+  as it does for remote `run`; the daemon also refuses a spawn template
+  whose workspace is not an absolute directory on its host. `--every 1s`
+  was accepted, and every occurrence of a spawn schedule can be a paid turn:
+  the CLI, the `create_schedule` tool and the daemon now refuse an interval
+  under 60 seconds with a message that names the minimum. Schedules created
+  before this keep their interval.
+- **Storage GC collects the workspaces of stopped delegated children
+  (#325).** A delegated child stopped at its deadline left its isolated
+  workspace registered as a worktree of the source repository indefinitely:
+  GC kept it while any ancestor of its parent was live, while the child was
+  Failed or Cancelled, and whenever the source checkout had been removed.
+  `aether storage gc` and the background sweep now remove such a workspace
+  once the child is stopped and its parent has ended or its source checkout
+  is gone, then run `git worktree prune` in the source repository. Every
+  preservation check still applies, so a workspace with unsaved files or
+  commits found nowhere else is kept and its report entry says why, and
+  `--dry-run` lists it as eligible without removing it. A stopped agent whose
+  workspace was collected can no longer be woken or restarted into it.
+- **Usage, times, CLI errors and configuration guidance are clearer (#315).**
+  Usage lines read `N in · N cache-write · N cached · N out`, and cost bases
+  consistently read `list price`, `provider-reported` or `mixed basis`.
+  Replay, artifact, resolve and provider backoff times are marked UTC.
+  Auto-start reports a daemon startup error as soon as it exits, rather than
+  waiting ten seconds. Config errors list every unknown setting together;
+  syntax errors say to fix the syntax, and error punctuation stays clean.
+  TUI-only flags appear only in `aether --help` and `aether tui --help`.
+  `aether daemon start` explains `aether daemon`; `aether stop` with no daemon
+  exits 0 with `aetherd not running`. `aether login` without a provider lists
+  them, and `aether login claude-code` without a terminal refuses with a hint.
+  The docs and update hint give `aether stop && aether daemon` for headless
+  hosts. The config template uses full model IDs, and the configuration docs
+  list the aliases.
+- **Reopening the TUI mid-turn shows pending steering again (#306).** The
+  "steering · lands at the next tool call" lines are rebuilt on attach from
+  the operator messages the running turn has not taken yet, and clear once it
+  takes them.
+- **Rejected messages return to the draft, and TUI shortcuts behave consistently
+  (#312).** Images refused by a host older than protocol 19 and a first request
+  sent without a model return to the agent's draft with their images. Uncertain
+  delivery also restores the draft and never resends automatically; the no-model
+  hint stays until the next key. Alt+O searches back through up to 64 messages
+  for file references, the viewer hint reads `Alt+- / Alt+=`, and `/theme`
+  previews the theme under the cursor, with Esc restoring the original.
+- **Theme swatches keep their own colours after mono (#316, #317).** Choosing mono
+  no longer strips colours from the `/theme` picker; only `NO_COLOR` keeps
+  swatches colourless.
+- **SSH terminals can confirm truecolor support (#318).** When `TERM` claims
+  256 colours and `COLORTERM` is missing, the startup probe asks the terminal
+  with DECRQSS and XTGETTCAP RGB and uses truecolor when confirmed. At 256
+  colours, the user-message band picks the nearest colour that still stands
+  out from the background.
+
 ## 1.2.6
 
 Released 2026-10-26. A bug-fix release for Claude Code agents steered

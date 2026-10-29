@@ -41,6 +41,10 @@ impl App {
         if self.terminal_replies.consume(key) {
             return Vec::new();
         }
+        if self.flash.as_ref().is_some_and(|flash| flash.until_key()) {
+            self.flash = None;
+            self.dirty = true;
+        }
         self.dirty = true;
         self.track_approvals();
         // The approval on screen when the key was pressed takes it; only then
